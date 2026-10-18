@@ -101,7 +101,7 @@ echo "✓ Production guards active, preset hashes intact, and extension schema/s
 # -----------------------------------------------------------------------------
 echo ""
 echo "[Gate 4/6] Running hermetic unit tests with race detector (EASYPROFILE_TEST_MODE=1)..."
-EASYPROFILE_TEST_MODE=1 go test -race -v ./internal/inspect
+EASYPROFILE_TEST_MODE=1 go test -race -v ./internal/...
 echo "✓ Hermetic unit tests passed with race detector."
 
 # -----------------------------------------------------------------------------
