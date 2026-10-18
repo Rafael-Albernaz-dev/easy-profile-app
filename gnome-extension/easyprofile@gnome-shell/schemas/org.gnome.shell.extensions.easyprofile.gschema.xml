@@ -1,0 +1,76 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<schemalist>
+  <schema id="org.gnome.shell.extensions.easyprofile" path="/org/gnome/shell/extensions/easyprofile/">
+    <!-- Volume & Mic Steps (with autorepeat) -->
+    <key name="shortcut-volume-up" type="as">
+      <default><![CDATA[['KP_Add']]]></default>
+      <summary>Volume Saída +2%</summary>
+    </key>
+    <key name="shortcut-volume-down" type="as">
+      <default><![CDATA[['KP_Subtract']]]></default>
+      <summary>Volume Saída -2%</summary>
+    </key>
+    <key name="shortcut-mic-up" type="as">
+      <default><![CDATA[['KP_Multiply']]]></default>
+      <summary>Microfone +2%</summary>
+    </key>
+    <key name="shortcut-mic-down" type="as">
+      <default><![CDATA[['KP_Divide']]]></default>
+      <summary>Microfone -2%</summary>
+    </key>
+
+    <!-- Toggles (IGNORE_AUTOREPEAT) -->
+    <key name="shortcut-mute-mic" type="as">
+      <default><![CDATA[['KP_0', 'KP_Insert']]]></default>
+      <summary>Toggle Dual-Mute Microfone</summary>
+    </key>
+    <key name="shortcut-mute-output" type="as">
+      <default><![CDATA[['KP_Decimal', 'KP_Delete', 'KP_Separator']]]></default>
+      <summary>Toggle Mute Saída</summary>
+    </key>
+    <key name="shortcut-mute-panic" type="as">
+      <default><![CDATA[['KP_Enter']]]></default>
+      <summary>Toggle Mute Total (Pânico)</summary>
+    </key>
+
+    <!-- Destination & Reset (IGNORE_AUTOREPEAT) -->
+    <key name="shortcut-dest-akg" type="as">
+      <default><![CDATA[['KP_1', 'KP_End']]]></default>
+      <summary>Selecionar Fone AKG K52</summary>
+    </key>
+    <key name="shortcut-dest-sp166" type="as">
+      <default><![CDATA[['KP_2', 'KP_Down']]]></default>
+      <summary>Selecionar Caixas SP166</summary>
+    </key>
+    <key name="shortcut-dest-toggle" type="as">
+      <default><![CDATA[['KP_3', 'KP_Next', 'KP_Page_Down']]]></default>
+      <summary>Alternar AKG ↔ Caixas</summary>
+    </key>
+    <key name="shortcut-reset-base" type="as">
+      <default><![CDATA[['KP_5', 'KP_Begin']]]></default>
+      <summary>Reset Padrão Diário Base</summary>
+    </key>
+
+    <!-- Unassigned No-Op Keys when NumLock is ON (Consume & Discard) -->
+    <key name="shortcut-noop-4" type="as">
+      <default><![CDATA[['KP_4', 'KP_Left']]]></default>
+      <summary>No-Op Silencioso 4</summary>
+    </key>
+    <key name="shortcut-noop-6" type="as">
+      <default><![CDATA[['KP_6', 'KP_Right']]]></default>
+      <summary>No-Op Silencioso 6</summary>
+    </key>
+    <key name="shortcut-noop-7" type="as">
+      <default><![CDATA[['KP_7', 'KP_Home']]]></default>
+      <summary>No-Op Silencioso 7</summary>
+    </key>
+    <key name="shortcut-noop-8" type="as">
+      <default><![CDATA[['KP_8', 'KP_Up']]]></default>
+      <summary>No-Op Silencioso 8</summary>
+    </key>
+    <key name="shortcut-noop-9" type="as">
+      <default><![CDATA[['KP_9', 'KP_Prior', 'KP_Page_Up']]]></default>
+      <summary>No-Op Silencioso 9</summary>
+    </key>
+  </schema>
+</schemalist>

@@ -1,0 +1,7 @@
+{
+  "uuid": "easyprofile@gnome-shell",
+  "name": "EasyProfileApp Indicator & Numpad Controller",
+  "description": "Top Bar status indicator and conditional Numpad Wayland audio control for EasyProfileApp.",
+  "shell-version": ["46"],
+  "version": 1
+}

@@ -1,0 +1,38 @@
+# Local AI Agent Governance (Strictly Ignored)
+AGENTS.md
+agents.md
+GEMINI.md
+gemini.md
+.agents/
+.agent/
+.codex/
+prompts/
+
+# Compiled Binaries & Build Artifacts
+/bin/
+/dist/
+easyprofiled
+easyprofilectl
+*.exe
+*.out
+*.test
+
+# Coverage & Profiling
+*.prof
+*.cov
+coverage.txt
+coverage.html
+
+# OS / Editor Swap Files
+.DS_Store
+*.swp
+*.swo
+*~
+.vscode/
+.idea/
+
+# Runtime / Local Temporary State
+*.sock
+*.pid
+*.lock
+/tmp/
