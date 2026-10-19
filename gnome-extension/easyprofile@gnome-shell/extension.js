@@ -1,5 +1,6 @@
 import Clutter from 'gi://Clutter';
 import Gio from 'gi://Gio';
+import GLib from 'gi://GLib';
 import Meta from 'gi://Meta';
 import Shell from 'gi://Shell';
 import St from 'gi://St';
@@ -221,15 +222,29 @@ export default class EasyProfileExtension extends Extension {
         } catch (error) { console.error(error); }
     }
 
-    _refreshStatus(done = null) {
+    _refreshStatus(done = null, retryCount = 0) {
         if (!this._enabled || !this._proxy?.g_name_owner) { done?.(null); return; }
         const generation = this._generation;
         const owner = this._proxy.g_name_owner;
         this._proxy.GetStatusRemote((result, error) => {
             if (!this._enabled || generation !== this._generation) return;
             if (owner !== this._proxy?.g_name_owner) { done?.(null); return; }
-            if (error || !result) { this._setConnected(false); done?.(null); return; }
+            if (error || !result) {
+                if (retryCount < 3 && this._proxy?.g_name_owner) {
+                    GLib.timeout_add(GLib.PRIORITY_DEFAULT, 200, () => {
+                        if (this._enabled && generation === this._generation && this._proxy?.g_name_owner) {
+                            this._refreshStatus(done, retryCount + 1);
+                        }
+                        return GLib.SOURCE_REMOVE;
+                    });
+                    return;
+                }
+                this._setConnected(false);
+                done?.(null);
+                return;
+            }
             this._onStateChanged(result[0]);
+            this._setConnected(true);
             done?.(this._status);
         }, this._cancellable);
     }

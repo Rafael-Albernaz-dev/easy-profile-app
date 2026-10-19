@@ -1,0 +1,16 @@
+[Unit]
+Description=EasyProfileApp Audio Daemon
+Documentation=https://github.com/Rafael-Albernaz-dev/easy-profile-app
+After=pipewire.service easyeffects.service
+PartOf=graphical-session.target
+
+[Service]
+Type=simple
+ExecStart=%h/.local/bin/easyprofilectl daemon --control --config %h/.config/easyprofile/config.json
+Restart=on-failure
+RestartSec=3
+MemoryMax=64M
+TasksMax=32
+
+[Install]
+WantedBy=graphical-session.target

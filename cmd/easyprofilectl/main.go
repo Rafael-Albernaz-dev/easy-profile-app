@@ -133,11 +133,6 @@ func runDaemon(args []string, stdout, stderr io.Writer) int {
 		return 1
 	}
 	defer conn.Close()
-	reply, err := conn.RequestName(daemon.DBusService, dbus.NameFlagDoNotQueue)
-	if err != nil || reply != dbus.RequestNameReplyPrimaryOwner {
-		fmt.Fprintln(stderr, "daemon name already owned or unavailable", err)
-		return 1
-	}
 	var pw adapters.PipeWirePort
 	var al adapters.AlsaPort
 	var ee adapters.EasyEffectsPort
@@ -152,8 +147,14 @@ func runDaemon(args []string, stdout, stderr io.Writer) int {
 		al = alsa.NewRealAlsa(3 * time.Second)
 		ee = easyeffects.NewRealEasyEffects("", 3*time.Second)
 	}
-	// Persistent graphical-session identity/cutover belongs to EP-006. Keep this development daemon in memory.
 	d := daemon.NewDaemon(ctrl, pw, al, ee)
+	if *fake {
+		d.SetSessionTracker(daemon.NewMemorySessionTracker("fake-session"))
+	} else {
+		sessionPath := daemon.DefaultSessionFilePath()
+		sessionID := daemon.ResolveCurrentSessionID()
+		d.SetSessionTracker(daemon.NewFileSessionTracker(sessionPath, sessionID))
+	}
 	if err := d.Configure(cfg); err != nil {
 		fmt.Fprintln(stderr, err)
 		d.Close()
@@ -172,6 +173,14 @@ func runDaemon(args []string, stdout, stderr io.Writer) int {
 	}
 	if err := d.Export(conn); err != nil {
 		fmt.Fprintln(stderr, "daemon export:", err)
+		return 1
+	}
+	// Request well-known name only AFTER methods and introspection are exported.
+	// This prevents the race condition where clients observe notify::g-name-owner
+	// and call methods before they are registered.
+	reply, err := conn.RequestName(daemon.DBusService, dbus.NameFlagDoNotQueue)
+	if err != nil || reply != dbus.RequestNameReplyPrimaryOwner {
+		fmt.Fprintln(stderr, "daemon name already owned or unavailable", err)
 		return 1
 	}
 	fmt.Fprintln(stdout, "easyprofile daemon ready on org.easyprofile.Daemon")

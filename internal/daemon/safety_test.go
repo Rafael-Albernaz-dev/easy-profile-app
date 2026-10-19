@@ -10,6 +10,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/toru/easy-profile-app/internal/adapters/alsa"
+	"github.com/toru/easy-profile-app/internal/adapters/easyeffects"
 	"github.com/toru/easy-profile-app/internal/adapters/pipewire"
 	"github.com/toru/easy-profile-app/internal/domain"
 )
@@ -304,5 +306,89 @@ func TestInitializationProtectsHardwareBeforeEnablingVirtualGain(t *testing.T) {
 	}
 	if pw.NodeVolumes[VirtualSinkNode] > 1 {
 		t.Fatal("startup retained >100% virtual gain")
+	}
+}
+
+func TestLoginPolicyVsDaemonRestartMutes(t *testing.T) {
+	ctrl := domain.NewAudioController(nil)
+	fakePW := pipewire.NewFakePipeWire()
+	fakeAlsa := alsa.NewFakeAlsa()
+	fakeEE := easyeffects.NewFakeEasyEffects("AKG K52 - Uso diario aprovado")
+
+	// Hardware initially observed with mic muted and output muted
+	fakePW.NodeMutes[VirtualSourceNode] = true
+	fakePW.NodeMutes[PhysicalMicPrefix] = true
+	fakePW.NodeMutes[VirtualSinkNode] = true
+
+	st := NewMemorySessionTracker("session-login-1")
+	d := NewDaemon(ctrl, fakePW, fakeAlsa, fakeEE)
+	d.SetSessionTracker(st)
+	d.SetStabilization(0)
+	t.Cleanup(d.Close)
+
+	ctx := context.Background()
+
+	// 1. First run on fresh login: login policy MUST apply (unmute output & mic, 95% out, 100% mic)
+	if err := d.InitHardware(ctx); err != nil {
+		t.Fatalf("InitHardware failed on login: %v", err)
+	}
+
+	status := statusOf(t, d)
+	if status.OutputMuted {
+		t.Errorf("expected output unmuted on login")
+	}
+	if status.MicVirtualMuted || status.MicPhysicalMuted {
+		t.Errorf("expected mic unmuted on login, got virt=%v phys=%v", status.MicVirtualMuted, status.MicPhysicalMuted)
+	}
+	if status.OutputVolume != 95 {
+		t.Errorf("expected output volume 95%% on login, got %d", status.OutputVolume)
+	}
+	if status.MicLevel != 100 {
+		t.Errorf("expected mic level 100%% on login, got %d", status.MicLevel)
+	}
+
+	// 2. User mutes mic for privacy
+	if _, err := d.ToggleMicMute(); err != nil {
+		t.Fatalf("ToggleMicMute failed: %v", err)
+	}
+	if !fakePW.NodeMutes[VirtualSourceNode] || !fakePW.NodeMutes[PhysicalMicPrefix] {
+		t.Fatalf("expected hardware mic to be muted by user")
+	}
+
+	// 3. Daemon restarts within the SAME session (e.g. systemctl restart easyprofiled)
+	ctrl2 := domain.NewAudioController(nil)
+	d2 := NewDaemon(ctrl2, fakePW, fakeAlsa, fakeEE)
+	d2.SetSessionTracker(st) // same session tracker, where login policy was already done!
+	d2.SetStabilization(0)
+	t.Cleanup(d2.Close)
+
+	if err := d2.InitHardware(ctx); err != nil {
+		t.Fatalf("InitHardware failed on restart: %v", err)
+	}
+
+	// It MUST preserve the user's observed privacy mutes, NOT force unmuting!
+	status2 := statusOf(t, d2)
+	if !status2.MicVirtualMuted || !status2.MicPhysicalMuted {
+		t.Errorf("daemon restart within same session stomped user mic mute! virt=%v phys=%v",
+			status2.MicVirtualMuted, status2.MicPhysicalMuted)
+	}
+
+	// 4. User logs out and logs in anew (new session ID)
+	st.SetSession("session-login-2")
+	ctrl3 := domain.NewAudioController(nil)
+	d3 := NewDaemon(ctrl3, fakePW, fakeAlsa, fakeEE)
+	d3.SetSessionTracker(st)
+	d3.SetStabilization(0)
+	t.Cleanup(d3.Close)
+
+	if err := d3.InitHardware(ctx); err != nil {
+		t.Fatalf("InitHardware failed on new login: %v", err)
+	}
+
+	// On NEW login, login policy runs and restores unmuted base daily state
+	status3 := statusOf(t, d3)
+	if status3.OutputMuted || status3.MicVirtualMuted || status3.MicPhysicalMuted {
+		t.Errorf("new login failed to apply unmuted base state: outMuted=%v micVirt=%v micPhys=%v",
+			status3.OutputMuted, status3.MicVirtualMuted, status3.MicPhysicalMuted)
 	}
 }

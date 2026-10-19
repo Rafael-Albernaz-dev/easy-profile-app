@@ -21,11 +21,11 @@
 
     <!-- Toggles (IGNORE_AUTOREPEAT) -->
     <key name="shortcut-mute-mic" type="as">
-      <default><![CDATA[['KP_0', 'KP_Insert']]]></default>
+      <default><![CDATA[['KP_0']]]></default>
       <summary>Toggle Dual-Mute Microfone</summary>
     </key>
     <key name="shortcut-mute-output" type="as">
-      <default><![CDATA[['KP_Decimal', 'KP_Delete', 'KP_Separator']]]></default>
+      <default><![CDATA[['KP_Decimal']]]></default>
       <summary>Toggle Mute Saída</summary>
     </key>
     <key name="shortcut-mute-panic" type="as">
@@ -35,41 +35,41 @@
 
     <!-- Destination & Reset (IGNORE_AUTOREPEAT) -->
     <key name="shortcut-dest-akg" type="as">
-      <default><![CDATA[['KP_1', 'KP_End']]]></default>
+      <default><![CDATA[['KP_1']]]></default>
       <summary>Selecionar Fone AKG K52</summary>
     </key>
     <key name="shortcut-dest-sp166" type="as">
-      <default><![CDATA[['KP_2', 'KP_Down']]]></default>
+      <default><![CDATA[['KP_2']]]></default>
       <summary>Selecionar Caixas SP166</summary>
     </key>
     <key name="shortcut-dest-toggle" type="as">
-      <default><![CDATA[['KP_3', 'KP_Next', 'KP_Page_Down']]]></default>
+      <default><![CDATA[['KP_3']]]></default>
       <summary>Alternar AKG ↔ Caixas</summary>
     </key>
     <key name="shortcut-reset-base" type="as">
-      <default><![CDATA[['KP_5', 'KP_Begin']]]></default>
+      <default><![CDATA[['KP_5']]]></default>
       <summary>Reset Padrão Diário Base</summary>
     </key>
 
     <!-- Unassigned No-Op Keys when NumLock is ON (Consume & Discard) -->
     <key name="shortcut-noop-4" type="as">
-      <default><![CDATA[['KP_4', 'KP_Left']]]></default>
+      <default><![CDATA[['KP_4']]]></default>
       <summary>No-Op Silencioso 4</summary>
     </key>
     <key name="shortcut-noop-6" type="as">
-      <default><![CDATA[['KP_6', 'KP_Right']]]></default>
+      <default><![CDATA[['KP_6']]]></default>
       <summary>No-Op Silencioso 6</summary>
     </key>
     <key name="shortcut-noop-7" type="as">
-      <default><![CDATA[['KP_7', 'KP_Home']]]></default>
+      <default><![CDATA[['KP_7']]]></default>
       <summary>No-Op Silencioso 7</summary>
     </key>
     <key name="shortcut-noop-8" type="as">
-      <default><![CDATA[['KP_8', 'KP_Up']]]></default>
+      <default><![CDATA[['KP_8']]]></default>
       <summary>No-Op Silencioso 8</summary>
     </key>
     <key name="shortcut-noop-9" type="as">
-      <default><![CDATA[['KP_9', 'KP_Prior', 'KP_Page_Up']]]></default>
+      <default><![CDATA[['KP_9']]]></default>
       <summary>No-Op Silencioso 9</summary>
     </key>
   </schema>

@@ -84,6 +84,7 @@ type Daemon struct {
 	status             DaemonStatus
 	observeOnly        bool
 	stabilization      time.Duration
+	sessionTracker     SessionTracker
 	qmu                sync.Mutex
 	wake               *sync.Cond
 	queue              []*request
@@ -104,6 +105,11 @@ func (d *Daemon) SetObserveOnly(v bool) {
 	defer d.mu.Unlock()
 	d.observeOnly = v
 	d.updateStatus(nil)
+}
+func (d *Daemon) SetSessionTracker(st SessionTracker) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	d.sessionTracker = st
 }
 func (d *Daemon) SetStabilization(v time.Duration) {
 	d.mu.Lock()
@@ -340,11 +346,7 @@ func (d *Daemon) InitHardware(ctx context.Context) error {
 		if err := d.refresh(c); err != nil {
 			return err
 		}
-		// Restarting during development adopts observed mutes instead of unmuting a live microphone.
-		d.ctrl.SetMicrophoneState(*d.status.ObservedMicVirtualMute, *d.status.ObservedMicPhysicalMute, d.ctrl.Microphone().PostDSPLevel)
-		if *d.status.ObservedOutputMute != d.ctrl.OutputMuted() {
-			d.ctrl.ToggleOutputMute()
-		}
+
 		route, err := d.pw.GetSinkPort(c, d.ctrl.ActiveDestination().PhysicalSinkName)
 		d.status.ObservedDestination = route
 		if err != nil {
@@ -366,11 +368,51 @@ func (d *Daemon) InitHardware(ctx context.Context) error {
 		if _, _, err := d.ctrl.SwitchDestination(target); err != nil {
 			return err
 		}
+
+		applyLogin := false
+		if d.sessionTracker != nil {
+			should, sErr := d.sessionTracker.ShouldApplyLoginPolicy()
+			if sErr == nil && should {
+				applyLogin = true
+			}
+		}
+
+		if applyLogin {
+			// LOGIN POLICY (ARCHITECTURE_AND_REQUIREMENTS.md):
+			// Output: Daily base preset, volume 95%, unmuted
+			// Mic: level 100%, unmuted (both virtual and physical)
+			d.ctrl.SetOutputVolume(domain.NewPercentageLevel(95))
+			d.ctrl.SetMicrophoneState(false, false, domain.NewPercentageLevel(100))
+			if d.ctrl.OutputMuted() {
+				d.ctrl.ToggleOutputMute()
+			}
+			dest := d.ctrl.ActiveDestination()
+			if dest.BasePreset != "" {
+				_ = d.ctrl.SelectOutputPreset(dest.BasePreset)
+			}
+		} else {
+			// RESTART WITHIN SAME SESSION:
+			// Adopt observed mutes to respect existing user privacy
+			d.ctrl.SetMicrophoneState(*d.status.ObservedMicVirtualMute, *d.status.ObservedMicPhysicalMute, d.ctrl.Microphone().PostDSPLevel)
+			if *d.status.ObservedOutputMute != d.ctrl.OutputMuted() {
+				d.ctrl.ToggleOutputMute()
+			}
+		}
+
 		if d.observeOnly {
+			if applyLogin && d.sessionTracker != nil {
+				_ = d.sessionTracker.MarkLoginPolicyApplied()
+			}
 			return nil
 		}
 
-		return d.applyDestination(c, d.ctrl.ActiveDestination())
+		if err := d.applyDestination(c, d.ctrl.ActiveDestination()); err != nil {
+			return err
+		}
+		if applyLogin && d.sessionTracker != nil {
+			_ = d.sessionTracker.MarkLoginPolicyApplied()
+		}
+		return nil
 	})
 	if returnErr != nil {
 		return errors.New(returnErr.Error())

@@ -1,0 +1,4 @@
+[D-BUS Service]
+Name=org.easyprofile.Daemon
+Exec=%h/.local/bin/easyprofilectl daemon --control
+SystemdService=easyprofiled.service
