@@ -23,7 +23,7 @@ func TestWPCTLLinearToCubicBoundary(t *testing.T) {
 	}
 }
 func TestRealReadsAndMonitorCannotEscapeTestMode(t *testing.T) {
-	t.Setenv("EASYPROFILE_TEST_MODE", "")
+	t.Setenv("EASYPROFILE_TEST_MODE", "1")
 	t.Setenv("PATH", t.TempDir())
 	r := NewRealPipeWire(0)
 	ctx := context.Background()
@@ -35,5 +35,34 @@ func TestRealReadsAndMonitorCannotEscapeTestMode(t *testing.T) {
 	}
 	if err := r.Watch(ctx, make(chan struct{}, 1)); err != ErrTestModeBlocked {
 		t.Fatal(err)
+	}
+}
+
+func TestMalformedMuteReadbackCannotAuthorizeUnmute(t *testing.T) {
+	for _, bad := range []string{"Volume:", "Volume: garbage", "Volume: NaN [MUTED]", "Volume: +Inf", "Volume: -1", "Volume: 0.5 UNKNOWN", "Volume: 0.5 [MUTED] extra"} {
+		if _, _, err := parseVolumeReadback([]byte(bad)); err == nil {
+			t.Fatalf("invalid mute readback accepted: %q", bad)
+		}
+	}
+	for _, valid := range []struct {
+		raw   string
+		muted bool
+	}{{"Volume: 0.95", false}, {"Volume: 0.00 [MUTED]", true}, {"Volume: 1.05 [MUTED]", true}} {
+		if _, muted, err := parseVolumeReadback([]byte(valid.raw)); err != nil || muted != valid.muted {
+			t.Fatal(valid.raw, muted, err)
+		}
+	}
+}
+
+func TestVolumeReadbackCannotHideOnePercentStepOrPhysicalCeilingViolation(t *testing.T) {
+	for _, percent := range []int{1, 50, 95, 97, 100} {
+		cubic := float64(percent) / 100
+		linear := cubic * cubic * cubic
+		if !volumeReadbackMatches(cubic, linear) {
+			t.Fatal("exact readback rejected", percent)
+		}
+		if volumeReadbackMatches(cubic-0.01, linear) || volumeReadbackMatches(cubic+0.01, linear) {
+			t.Fatal("whole step mismatch accepted", percent)
+		}
 	}
 }

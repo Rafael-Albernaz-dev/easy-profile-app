@@ -96,6 +96,18 @@ func (c Config) Validate() error {
 	return nil
 }
 func (c Config) Controller() (*domain.AudioController, error) {
+	return c.controller(nil, "")
+}
+
+// ControllerWithSession is the production construction path; tests explicitly inject a temporary store.
+func (c Config) ControllerWithSession(store *domain.SessionStore, sessionID string) (*domain.AudioController, error) {
+	if store == nil || sessionID == "" {
+		return nil, errors.New("session store and graphical identity required")
+	}
+	return c.controller(store, sessionID)
+}
+
+func (c Config) controller(store *domain.SessionStore, sessionID string) (*domain.AudioController, error) {
 	if err := c.Validate(); err != nil {
 		return nil, err
 	}
@@ -110,6 +122,9 @@ func (c Config) Controller() (*domain.AudioController, error) {
 		} else {
 			sp = dest
 		}
+	}
+	if store != nil {
+		return domain.NewSessionController(store, sessionID, akg, sp)
 	}
 	return domain.NewAudioControllerWithDestinations(akg, sp), nil
 }

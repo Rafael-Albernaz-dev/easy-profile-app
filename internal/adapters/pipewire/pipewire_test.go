@@ -14,6 +14,9 @@ func TestRealPipeWire_TestModeProtection(t *testing.T) {
 	rpw := NewRealPipeWire(0)
 	ctx := context.Background()
 
+	if _, err := rpw.FindNodeID(ctx, "test"); err != ErrTestModeBlocked {
+		t.Fatalf("expected ErrTestModeBlocked, got %v", err)
+	}
 	if err := rpw.EnsureMonitorChannelVolumes(ctx, "test"); err != ErrTestModeBlocked {
 		t.Fatalf("expected ErrTestModeBlocked, got %v", err)
 	}
@@ -29,6 +32,9 @@ func TestRealPipeWire_TestModeProtection(t *testing.T) {
 	if _, err := rpw.GetRawMicStreams(ctx, "mic"); err != ErrTestModeBlocked {
 		t.Fatalf("expected ErrTestModeBlocked, got %v", err)
 	}
+
+	rpw.InvalidateCache()
+	rpw.SetMicrophonePrefix("custom_prefix")
 }
 
 func TestFakePipeWire_InMemoryBehavior(t *testing.T) {

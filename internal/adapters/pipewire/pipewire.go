@@ -13,6 +13,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/toru/easy-profile-app/internal/adapters"
@@ -30,6 +31,12 @@ var (
 type RealPipeWire struct {
 	micPrefix string
 	timeout   time.Duration
+
+	mu              sync.RWMutex
+	nodeIDCache     map[string]int
+	monitorVolumes  map[string]bool
+	cacheSerials    map[string]int
+	cacheGeneration uint64
 }
 
 // NewRealPipeWire creates an instance with safe default timeouts.
@@ -38,8 +45,11 @@ func NewRealPipeWire(timeout time.Duration) *RealPipeWire {
 		timeout = 3 * time.Second
 	}
 	return &RealPipeWire{
-		timeout:   timeout,
-		micPrefix: "alsa_input.usb-MU900_KA-1333",
+		timeout:        timeout,
+		micPrefix:      "alsa_input.usb-MU900_KA-1333",
+		nodeIDCache:    make(map[string]int),
+		monitorVolumes: make(map[string]bool),
+		cacheSerials:   make(map[string]int),
 	}
 }
 
@@ -52,11 +62,29 @@ func (r *RealPipeWire) checkTestMode() error {
 	return nil
 }
 
+// InvalidateCache clears the ephemeral node ID and monitor.channel-volumes cache.
+func (r *RealPipeWire) InvalidateCache() {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.nodeIDCache = make(map[string]int)
+	r.monitorVolumes = make(map[string]bool)
+	r.cacheSerials = make(map[string]int)
+	r.cacheGeneration++
+}
+
 // FindNodeID resolves a node name (e.g. "easyeffects_sink") to its ephemeral PipeWire ID.
 func (r *RealPipeWire) FindNodeID(ctx context.Context, nodeName string) (int, error) {
 	if err := r.checkTestMode(); err != nil {
 		return 0, err
 	}
+
+	r.mu.RLock()
+	generation := r.cacheGeneration
+	if id, ok := r.nodeIDCache[nodeName]; ok && id > 0 {
+		r.mu.RUnlock()
+		return id, nil
+	}
+	r.mu.RUnlock()
 
 	ctx, cancel := context.WithTimeout(ctx, r.timeout)
 	defer cancel()
@@ -67,16 +95,35 @@ func (r *RealPipeWire) FindNodeID(ctx context.Context, nodeName string) (int, er
 	cmd.Stderr = &stderr
 
 	if err := cmd.Run(); err != nil {
+		r.InvalidateCache()
 		return 0, fmt.Errorf("pw-dump failed: %w (stderr: %s)", err, stderr.String())
 	}
 
 	g, err := inspect.ParseGraph(stdout.Bytes())
 	if err != nil {
+		r.InvalidateCache()
 		return 0, fmt.Errorf("failed to parse pw-dump graph: %w", err)
 	}
+
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if generation != r.cacheGeneration {
+		return 0, errors.New("PipeWire graph changed during node resolution; retry")
+	}
+	if r.nodeIDCache == nil {
+		r.nodeIDCache = make(map[string]int)
+	}
+
 	targetID := 0
+	if nodeName == r.micPrefix {
+		mic, err := resolveMicrophone(g, nodeName)
+		if err != nil {
+			return 0, err
+		}
+		targetID = mic.ID
+	}
 	for id, node := range g.Nodes {
-		if node.Name == nodeName || (nodeName == r.micPrefix && strings.HasPrefix(node.Name, nodeName+"_")) {
+		if nodeName != r.micPrefix && node.Name == nodeName {
 			if targetID != 0 {
 				return 0, fmt.Errorf("ambiguous node identity %q", nodeName)
 			}
@@ -87,6 +134,8 @@ func (r *RealPipeWire) FindNodeID(ctx context.Context, nodeName string) (int, er
 	if targetID == 0 {
 		return 0, fmt.Errorf("%w: %q", ErrNodeNotFound, nodeName)
 	}
+	r.nodeIDCache[nodeName] = targetID
+	r.cacheSerials[nodeName] = g.Nodes[targetID].Serial
 	return targetID, nil
 }
 
@@ -95,6 +144,13 @@ func (r *RealPipeWire) EnsureMonitorChannelVolumes(ctx context.Context, nodeName
 	if err := r.checkTestMode(); err != nil {
 		return err
 	}
+
+	r.mu.RLock()
+	if r.monitorVolumes[nodeName] {
+		r.mu.RUnlock()
+		return nil
+	}
+	r.mu.RUnlock()
 
 	id, err := r.FindNodeID(ctx, nodeName)
 	if err != nil {
@@ -110,16 +166,27 @@ func (r *RealPipeWire) EnsureMonitorChannelVolumes(ctx context.Context, nodeName
 	cmd.Stderr = &stderr
 
 	if err := cmd.Run(); err != nil {
+		r.InvalidateCache()
 		return fmt.Errorf("pw-cli set monitor.channel-volumes failed on node %d: %w (stderr: %s)", id, err, stderr.String())
 	}
 	g, err := r.graph(ctx)
 	if err != nil {
+		r.InvalidateCache()
 		return err
 	}
 	node := g.Nodes[id]
-	if node == nil || node.MonitorChannelVolumes == nil || !*node.MonitorChannelVolumes {
+	if node == nil || node.Name != nodeName || node.MonitorChannelVolumes == nil || !*node.MonitorChannelVolumes {
+		r.InvalidateCache()
 		return errors.New("monitor.channel-volumes readback is not true")
 	}
+
+	r.mu.Lock()
+	if r.monitorVolumes == nil {
+		r.monitorVolumes = make(map[string]bool)
+	}
+	r.monitorVolumes[nodeName] = true
+	r.mu.Unlock()
+
 	return nil
 }
 
@@ -147,18 +214,17 @@ func (r *RealPipeWire) SetNodeVolume(ctx context.Context, nodeName string, linea
 	cmd.Stderr = &stderr
 
 	if err := cmd.Run(); err != nil {
+		r.InvalidateCache()
 		return fmt.Errorf("wpctl set-volume %d %s failed: %w (stderr: %s)", id, volStr, err, stderr.String())
 	}
 	out, err := exec.CommandContext(ctx, "wpctl", "get-volume", strconv.Itoa(id)).Output()
 	if err != nil {
+		r.InvalidateCache()
 		return err
 	}
-	fields := strings.Fields(string(out))
-	if len(fields) < 2 || fields[0] != "Volume:" {
-		return errors.New("invalid volume readback")
-	}
-	volume, err := strconv.ParseFloat(fields[1], 64)
-	if err != nil || math.Abs(volume-math.Cbrt(linearVolume)) > 0.011 {
+	volume, _, err := parseVolumeReadback(out)
+	if err != nil || !volumeReadbackMatches(volume, linearVolume) {
+		r.InvalidateCache()
 		return errors.New("volume readback mismatch")
 	}
 	return nil
@@ -188,6 +254,7 @@ func (r *RealPipeWire) SetNodeMute(ctx context.Context, nodeName string, muted b
 	cmd.Stderr = &stderr
 
 	if err := cmd.Run(); err != nil {
+		r.InvalidateCache()
 		return fmt.Errorf("wpctl set-mute %d %s failed: %w (stderr: %s)", id, flag, err, stderr.String())
 	}
 	return nil
@@ -219,6 +286,7 @@ func (r *RealPipeWire) SetSinkPort(ctx context.Context, sinkName string, portNam
 			ctx, cancel := context.WithTimeout(ctx, r.timeout)
 			defer cancel()
 			if out, err := exec.CommandContext(ctx, "pw-cli", "s", strconv.Itoa(deviceID), "Route", props).CombinedOutput(); err != nil {
+				r.InvalidateCache()
 				return fmt.Errorf("switch route: %w: %s", err, out)
 			}
 			return nil
@@ -250,17 +318,11 @@ func (r *RealPipeWire) GetRawMicStreams(ctx context.Context, micNodeName string)
 		return nil, fmt.Errorf("failed to parse pw-dump: %w", err)
 	}
 
-	// Find physical mic node ID (matching prefix/name)
-	micID := 0
-	for id, n := range g.Nodes {
-		if strings.HasPrefix(n.Name, micNodeName) || n.Name == micNodeName {
-			micID = id
-			break
-		}
+	mic, err := resolveMicrophone(g, micNodeName)
+	if err != nil {
+		return nil, err
 	}
-	if micID == 0 {
-		return nil, nil // Mic not currently present in graph
-	}
+	micID := mic.ID
 
 	// Find links where outNode == micID
 	rawApps := []string{}
@@ -299,9 +361,16 @@ func (r *RealPipeWire) graph(ctx context.Context) (*inspect.Graph, error) {
 	defer cancel()
 	out, err := exec.CommandContext(ctx, "pw-dump", "--no-colors").Output()
 	if err != nil {
+		r.InvalidateCache()
 		return nil, err
 	}
-	return inspect.ParseGraph(out)
+	g, err := inspect.ParseGraph(out)
+	if err != nil {
+		r.InvalidateCache()
+		return nil, err
+	}
+	r.observeGraph(g)
+	return g, nil
 }
 func (r *RealPipeWire) GetNodeMute(ctx context.Context, name string) (bool, error) {
 	id, err := r.FindNodeID(ctx, name)
@@ -312,12 +381,15 @@ func (r *RealPipeWire) GetNodeMute(ctx context.Context, name string) (bool, erro
 	defer cancel()
 	out, err := exec.CommandContext(ctx, "wpctl", "get-volume", strconv.Itoa(id)).Output()
 	if err != nil {
+		r.InvalidateCache()
 		return false, err
 	}
-	if !strings.HasPrefix(string(out), "Volume:") {
-		return false, errors.New("invalid wpctl mute readback")
+	_, muted, err := parseVolumeReadback(out)
+	if err != nil {
+		r.InvalidateCache()
+		return false, err
 	}
-	return strings.Contains(string(out), "[MUTED]"), nil
+	return muted, nil
 }
 func (r *RealPipeWire) GetSinkPort(ctx context.Context, name string) (string, error) {
 	g, err := r.graph(ctx)
@@ -344,6 +416,8 @@ func (r *RealPipeWire) Watch(ctx context.Context, events chan<- struct{}) error 
 	if err := r.checkTestMode(); err != nil {
 		return err
 	}
+	r.InvalidateCache()
+	defer r.InvalidateCache()
 	cmd := exec.CommandContext(ctx, "pw-dump", "--monitor", "--no-colors")
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
@@ -373,8 +447,11 @@ func (r *RealPipeWire) Watch(ctx context.Context, events chan<- struct{}) error 
 			if obj.Type != "" {
 				types[obj.ID] = kind
 			}
-			if strings.HasSuffix(kind, ":Node") || strings.HasSuffix(kind, ":Link") || strings.HasSuffix(kind, ":Device") {
+			if strings.HasSuffix(kind, ":Node") || strings.HasSuffix(kind, ":Link") || strings.HasSuffix(kind, ":Device") || string(obj.Info) == "null" {
 				relevant = true
+			}
+			if strings.HasSuffix(kind, ":Node") || strings.HasSuffix(kind, ":Device") || string(obj.Info) == "null" {
+				r.invalidateObject(obj.ID)
 			}
 			if string(obj.Info) == "null" {
 				delete(types, obj.ID)
@@ -408,6 +485,70 @@ func wpctlVolume(linear float64) (string, error) {
 	return fmt.Sprintf("%.9f", math.Cbrt(linear)), nil
 }
 
+// An incomplete/malformed readback is unknown, never an implicit unmuted snapshot.
+func parseVolumeReadback(out []byte) (float64, bool, error) {
+	fields := strings.Fields(string(out))
+	if len(fields) < 2 || len(fields) > 3 || fields[0] != "Volume:" {
+		return 0, false, errors.New("invalid wpctl volume/mute readback")
+	}
+	volume, err := strconv.ParseFloat(fields[1], 64)
+	if err != nil || math.IsNaN(volume) || math.IsInf(volume, 0) || volume < 0 {
+		return 0, false, errors.New("invalid wpctl numeric volume")
+	}
+	if len(fields) == 3 && fields[2] != "[MUTED]" {
+		return 0, false, errors.New("unknown wpctl mute state")
+	}
+	return volume, len(fields) == 3, nil
+}
+
+// wpctl prints two decimals: allow rounding error, never an entire 1% step.
+func volumeReadbackMatches(cubic, linear float64) bool {
+	return math.Abs(cubic-math.Cbrt(linear)) <= 0.005001
+}
+
 // SetMicrophonePrefix configures the only name allowed to match a reconnect suffix.
 // Call it during construction, before the adapter is shared with the daemon.
-func (r *RealPipeWire) SetMicrophonePrefix(prefix string) { r.micPrefix = prefix }
+func (r *RealPipeWire) SetMicrophonePrefix(prefix string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.micPrefix = prefix
+	r.nodeIDCache = make(map[string]int)
+	r.monitorVolumes = make(map[string]bool)
+	r.cacheSerials = make(map[string]int)
+	r.cacheGeneration++
+}
+
+// invalidateObject is shared by watcher updates/removals; aliases are dropped together.
+func (r *RealPipeWire) invalidateObject(id int) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for name, cached := range r.nodeIDCache {
+		if cached == id {
+			delete(r.nodeIDCache, name)
+			delete(r.cacheSerials, name)
+			delete(r.monitorVolumes, name)
+		}
+	}
+	r.monitorVolumes = make(map[string]bool)
+	r.cacheGeneration++
+}
+
+// Fresh snapshots also detect changes missed while a watcher was disconnected.
+func (r *RealPipeWire) observeGraph(g *inspect.Graph) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for name, id := range r.nodeIDCache {
+		n := g.Nodes[id]
+		matches := n != nil && (n.Name == name || (name == r.micPrefix && strings.HasPrefix(n.Name, name+"_")))
+		if !matches || n.Serial != r.cacheSerials[name] {
+			delete(r.nodeIDCache, name)
+			delete(r.cacheSerials, name)
+			delete(r.monitorVolumes, name)
+			r.cacheGeneration++
+		}
+	}
+	r.monitorVolumes = make(map[string]bool)
+	for _, n := range g.Nodes {
+		r.monitorVolumes[n.Name] = n.MonitorChannelVolumes != nil && *n.MonitorChannelVolumes
+	}
+}

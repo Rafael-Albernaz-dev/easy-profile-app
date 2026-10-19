@@ -1,11 +1,35 @@
 package domain_test
 
 import (
+	"math"
 	"path/filepath"
 	"testing"
 
 	"github.com/toru/easy-profile-app/internal/domain"
 )
+
+func TestEveryPercentageRoundTripsAndRepeatedStepsClamp(t *testing.T) {
+	for percent := 0; percent <= 100; percent++ {
+		level := domain.NewPercentageLevel(percent)
+		linear := level.LinearRatio()
+		if math.IsNaN(linear) || linear < 0 || linear > 1 || domain.NewPercentageFromRatio(linear).Percent() != percent {
+			t.Fatalf("linear/cubic round trip failed for %d", percent)
+		}
+	}
+	level := domain.NewPercentageLevel(0)
+	for range 150 {
+		level = level.AddSteps(1)
+	}
+	if level.Percent() != 100 {
+		t.Fatal("repeated +1 escaped clamp")
+	}
+	for range 150 {
+		level = level.AddSteps(-1)
+	}
+	if level.Percent() != 0 {
+		t.Fatal("repeated -1 escaped clamp")
+	}
+}
 
 func TestPercentageLevel_ArithmeticAndClamping(t *testing.T) {
 	lvl := domain.NewPercentageLevel(95)
@@ -190,5 +214,33 @@ func TestSessionStore_PersistenceAndRecall(t *testing.T) {
 	_, sp166State, _ := ctrl2.SwitchDestination(domain.DestSP166)
 	if sp166State.VirtualVolume != 60 {
 		t.Errorf("expected SP166 volume to be 60%% after restart, got %d%%", sp166State.VirtualVolume)
+	}
+}
+
+func TestAudioController_VolumeStep1Percent(t *testing.T) {
+	tmpDir := t.TempDir()
+	store := domain.NewSessionStore(filepath.Join(tmpDir, "session.json"))
+	ctrl := domain.NewAudioController(store)
+
+	ctrl.SetOutputVolume(domain.NewPercentageLevel(50))
+	newVol := ctrl.StepOutputVolume(1)
+	if newVol.Percent() != 51 {
+		t.Errorf("expected 51%% after StepOutputVolume(1), got %d%%", newVol.Percent())
+	}
+
+	newVol = ctrl.StepOutputVolume(-1)
+	if newVol.Percent() != 50 {
+		t.Errorf("expected 50%% after StepOutputVolume(-1), got %d%%", newVol.Percent())
+	}
+
+	ctrl.SetMicLevel(domain.NewPercentageLevel(80))
+	newMic := ctrl.StepMicLevel(1)
+	if newMic.Percent() != 81 {
+		t.Errorf("expected 81%% after StepMicLevel(1), got %d%%", newMic.Percent())
+	}
+
+	newMic = ctrl.StepMicLevel(-1)
+	if newMic.Percent() != 80 {
+		t.Errorf("expected 80%% after StepMicLevel(-1), got %d%%", newMic.Percent())
 	}
 }

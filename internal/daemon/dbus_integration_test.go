@@ -17,19 +17,22 @@ func TestDBusIntegrationAllMethodsAndSignals(t *testing.T) {
 	if os.Getenv("EASYPROFILE_TEST_MODE") != "1" {
 		t.Fatal("test mode missing")
 	}
+	if os.Getenv("EASYPROFILE_PRIVATE_BUS") != "1" || os.Getenv("EASYPROFILE_PARENT_BUS_ADDRESS") == "" || os.Getenv("DBUS_SESSION_BUS_ADDRESS") == os.Getenv("EASYPROFILE_PARENT_BUS_ADDRESS") {
+		t.Fatal("private bus harness required")
+	}
 	server, err := dbus.ConnectSessionBus()
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer server.Close()
-	reply, err := server.RequestName(DBusService, dbus.NameFlagDoNotQueue)
-	if err != nil || reply != dbus.RequestNameReplyPrimaryOwner {
-		t.Fatalf("request name: %v %v", reply, err)
-	}
 	d, pw, _, _ := setupTestDaemon(t)
 	pw.RawStreams = []string{"Recorder"}
 	if err := d.Export(server); err != nil {
 		t.Fatal(err)
+	}
+	reply, err := server.RequestName(DBusService, dbus.NameFlagDoNotQueue)
+	if err != nil || reply != dbus.RequestNameReplyPrimaryOwner {
+		t.Fatalf("request name: %v %v", reply, err)
 	}
 	client, err := dbus.ConnectSessionBus()
 	if err != nil {
@@ -50,6 +53,7 @@ func TestDBusIntegrationAllMethodsAndSignals(t *testing.T) {
 		args []interface{}
 	}{
 		{"SetVolume", []interface{}{int32(2)}}, {"SetVolumeAbsolute", []interface{}{int32(50)}},
+		{"SetVolumeForDestination", []interface{}{"akg", int32(50)}},
 		{"SetMicVolume", []interface{}{int32(-2)}}, {"SetMicVolumeAbsolute", []interface{}{int32(90)}},
 		{"ToggleOutputMute", nil}, {"ToggleMicMute", nil}, {"TogglePanic", nil}, {"TogglePanic", nil},
 		{"SelectDestination", []interface{}{"sp166"}}, {"ToggleDestination", nil},
@@ -89,11 +93,14 @@ func TestDBusIntegrationAllMethodsAndSignals(t *testing.T) {
 	if err := obj.CallWithContext(ctx, DBusInterface+".Close", 0).Err; err == nil {
 		t.Fatal("lifecycle method exposed")
 	}
+	if err := obj.CallWithContext(ctx, DBusInterface+".Restart", 0).Err; err == nil {
+		t.Fatal("restart exposed over IPC")
+	}
 	var xml string
 	if err := obj.CallWithContext(ctx, "org.freedesktop.DBus.Introspectable.Introspect", 0).Store(&xml); err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(xml, `type="i"`) || strings.Contains(xml, `name="Close"`) {
+	if !strings.Contains(xml, `type="i"`) || strings.Contains(xml, `name="Close"`) || strings.Contains(xml, `name="Restart"`) {
 		t.Fatal("unexpected IPC contract", xml)
 	}
 	// Measure the in-memory IPC path, independently from audio subprocess latency.

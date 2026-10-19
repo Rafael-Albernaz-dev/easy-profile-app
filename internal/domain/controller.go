@@ -1,6 +1,7 @@
 package domain
 
 import (
+	"fmt"
 	"sync"
 )
 
@@ -26,6 +27,9 @@ type AudioController struct {
 	mic                  *Microphone
 	panicState           PanicSnapshot
 	store                *SessionStore
+	sessionID            string
+	persistenceErr       error
+	restoredSession      bool
 }
 
 // NewAudioController constructs the controller, optionally restoring previous session data.
@@ -36,6 +40,57 @@ func NewAudioController(store *SessionStore) *AudioController {
 // NewAudioControllerWithDestinations uses validated setup configuration and session-only memory.
 func NewAudioControllerWithDestinations(akg, sp166 *Destination) *AudioController {
 	return newAudioController(nil, akg, sp166)
+}
+
+// NewSessionController restores only this graphical session, with configured destinations.
+// A corrupt store is an initialization error, never permission to apply default gains.
+func NewSessionController(store *SessionStore, sessionID string, akg, sp166 *Destination) (*AudioController, error) {
+	c := newAudioController(nil, akg, sp166)
+	c.store, c.sessionID = store, sessionID
+	data, err := store.Load()
+	if err != nil {
+		return nil, err
+	}
+	if data != nil && data.SessionID == sessionID {
+		if data.ActiveDestination != DestAKG && data.ActiveDestination != DestSP166 {
+			return nil, fmt.Errorf("invalid saved destination %q", data.ActiveDestination)
+		}
+		if data.MicLevelPct < 0 || data.MicLevelPct > 100 || len(data.Ports) != 2 {
+			return nil, fmt.Errorf("invalid saved session levels/ports")
+		}
+		for _, dest := range []*Destination{akg, sp166} {
+			port, ok := data.Ports[dest.ID]
+			if !ok || port.VirtualVolume < 0 || port.VirtualVolume > 100 || !dest.IsPresetCompatible(port.ActivePreset) {
+				return nil, fmt.Errorf("invalid saved port state for %s", dest.ID)
+			}
+		}
+		c.restoreFromSessionData(data)
+		c.restoredSession = true
+	}
+	if data != nil && data.SessionID == "" {
+		return nil, fmt.Errorf("saved state has no graphical session identity")
+	}
+	return c, nil
+}
+
+// SessionStateAvailable refuses a same-login restart with missing persisted gains.
+func (c *AudioController) SessionStateAvailable() bool {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	return c.store == nil || c.restoredSession
+}
+
+func (c *AudioController) HasRestoredSession() bool {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	return c.restoredSession
+}
+
+// PersistenceError exposes failed state writes without changing existing domain command signatures.
+func (c *AudioController) PersistenceError() error {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	return c.persistenceErr
 }
 func newAudioController(store *SessionStore, akg, sp166 *Destination) *AudioController {
 	defaultVol := NewPercentageLevel(95)
@@ -57,14 +112,16 @@ func newAudioController(store *SessionStore, akg, sp166 *Destination) *AudioCont
 			},
 		},
 		outputMuted:          false,
-		volumeStepPercent:    2,
+		volumeStepPercent:    1,
 		defaultVirtualVolume: defaultVol,
 		mic:                  NewDefaultKA1333(),
 		store:                store,
 	}
 
 	if store != nil {
-		if data, err := store.Load(); err == nil && data != nil {
+		data, err := store.Load()
+		c.persistenceErr = err
+		if err == nil && data != nil {
 			c.restoreFromSessionData(data)
 		}
 	}
@@ -73,6 +130,7 @@ func newAudioController(store *SessionStore, akg, sp166 *Destination) *AudioCont
 }
 
 func (c *AudioController) restoreFromSessionData(data *SessionData) {
+	c.panicState = data.Panic
 	if _, ok := c.destinations[data.ActiveDestination]; ok {
 		c.activeDestination = data.ActiveDestination
 	}
@@ -95,13 +153,15 @@ func (c *AudioController) restoreFromSessionData(data *SessionData) {
 	}
 }
 
-// persistAsync saves current session data to disk if store is available.
+// persist saves current session data and retains I/O errors for the daemon to report.
 func (c *AudioController) persist() {
 	if c.store == nil {
 		return
 	}
 	session := &SessionData{
 		Version:           1,
+		SessionID:         c.sessionID,
+		Panic:             c.panicState,
 		ActiveDestination: c.activeDestination,
 		OutputMuted:       c.outputMuted,
 		MicLevelPct:       c.mic.PostDSPLevel.Percent(),
@@ -112,7 +172,7 @@ func (c *AudioController) persist() {
 	for id, state := range c.portMemory {
 		session.Ports[id] = state
 	}
-	_ = c.store.Save(session)
+	c.persistenceErr = c.store.Save(session)
 }
 
 // ActiveDestination returns the currently active destination entity.
@@ -215,7 +275,7 @@ func (c *AudioController) ToggleDestination() (*Destination, PortSessionState) {
 	return cloneDestination(c.destinations[target]), state
 }
 
-// StepOutputVolume adjusts the current port's virtual volume by steps * 2%.
+// StepOutputVolume adjusts the current port's virtual volume by steps * 1%.
 func (c *AudioController) StepOutputVolume(steps int) PercentageLevel {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -240,7 +300,7 @@ func (c *AudioController) SetOutputVolume(level PercentageLevel) PercentageLevel
 	return level
 }
 
-// StepMicLevel adjusts the post-DSP microphone level by steps * 2%.
+// StepMicLevel adjusts the post-DSP microphone level by steps * 1%.
 func (c *AudioController) StepMicLevel(steps int) PercentageLevel {
 	c.mu.Lock()
 	defer c.mu.Unlock()

@@ -72,6 +72,7 @@ func (r *RealPipeWire) MigrateRawMicStream(ctx context.Context, micPrefix, virtu
 		return err
 	}
 	if out, err := exec.CommandContext(ctx, "pw-metadata", "-n", "default", strconv.Itoa(stream.ID), "target.object", "Spa:String", virtual.Name).CombinedOutput(); err != nil {
+		r.InvalidateCache()
 		return fmt.Errorf("stream migration: %w: %s", err, out)
 	}
 	ticker := time.NewTicker(50 * time.Millisecond)

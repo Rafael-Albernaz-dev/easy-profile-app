@@ -2,7 +2,9 @@ package daemon
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
+	"github.com/toru/easy-profile-app/internal/statefile"
 	"os"
 	"path/filepath"
 	"sync"
@@ -44,7 +46,7 @@ func NewFileSessionTracker(filePath, sessionID string) *FileSessionTracker {
 // ResolveCurrentSessionID determines the current graphical session identifier:
 // 1. XDG_SESSION_ID (standard logind session ID)
 // 2. SESSION_MANAGER (GNOME session manager socket)
-// 3. WAYLAND_DISPLAY + DBUS_SESSION_BUS_ADDRESS
+// Socket paths and WAYLAND_DISPLAY can survive logout; they cannot authorize unmute.
 func ResolveCurrentSessionID() string {
 	if s := os.Getenv("XDG_SESSION_ID"); s != "" {
 		return s
@@ -52,45 +54,53 @@ func ResolveCurrentSessionID() string {
 	if s := os.Getenv("SESSION_MANAGER"); s != "" {
 		return s
 	}
-	w := os.Getenv("WAYLAND_DISPLAY")
-	d := os.Getenv("DBUS_SESSION_BUS_ADDRESS")
-	if w != "" || d != "" {
-		return fmt.Sprintf("%s:%s", w, d)
-	}
-	return "default-session"
+	return ""
 }
 
 // DefaultSessionFilePath returns the standard session state file path.
 func DefaultSessionFilePath() string {
+	return runtimeStatePath("session.json")
+}
+
+// DefaultLoginFilePath is separate from the volume/preset snapshot.
+func DefaultLoginFilePath() string { return runtimeStatePath("login_session.json") }
+
+func runtimeStatePath(name string) string {
 	if runtimeDir := os.Getenv("XDG_RUNTIME_DIR"); runtimeDir != "" {
-		return filepath.Join(runtimeDir, "easyprofile", "login_session.json")
+		return filepath.Join(runtimeDir, "easyprofile", name)
 	}
 	if stateHome := os.Getenv("XDG_STATE_HOME"); stateHome != "" {
-		return filepath.Join(stateHome, "easyprofile", "login_session.json")
+		return filepath.Join(stateHome, "easyprofile", name)
 	}
 	home, _ := os.UserHomeDir()
-	return filepath.Join(home, ".local", "state", "easyprofile", "login_session.json")
+	return filepath.Join(home, ".local", "state", "easyprofile", name)
 }
 
 // ShouldApplyLoginPolicy checks whether the session file matches the current session ID and was completed.
 func (f *FileSessionTracker) ShouldApplyLoginPolicy() (bool, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	if f.sessionID == "" {
+		return false, errors.New("graphical session identity unavailable; automatic unmute refused")
+	}
 
 	data, err := os.ReadFile(f.filePath)
 	if err != nil {
 		if os.IsNotExist(err) {
 			return true, nil
 		}
-		return true, err
+		return false, err
 	}
 
 	var state sessionData
 	if err := json.Unmarshal(data, &state); err != nil {
-		return true, nil
+		return false, fmt.Errorf("invalid login marker: %w", err)
+	}
+	if state.SessionID == "" || state.AppliedAt.IsZero() || !state.PolicyDone {
+		return false, errors.New("incomplete login marker; automatic unmute refused")
 	}
 
-	if state.SessionID != f.sessionID || !state.PolicyDone {
+	if state.SessionID != f.sessionID {
 		return true, nil
 	}
 
@@ -101,6 +111,9 @@ func (f *FileSessionTracker) ShouldApplyLoginPolicy() (bool, error) {
 func (f *FileSessionTracker) MarkLoginPolicyApplied() error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	if f.sessionID == "" {
+		return errors.New("cannot record unknown graphical session")
+	}
 
 	state := sessionData{
 		SessionID:  f.sessionID,
@@ -108,16 +121,12 @@ func (f *FileSessionTracker) MarkLoginPolicyApplied() error {
 		PolicyDone: true,
 	}
 
-	if err := os.MkdirAll(filepath.Dir(f.filePath), 0700); err != nil {
-		return err
-	}
-
 	data, err := json.MarshalIndent(state, "", "  ")
 	if err != nil {
 		return err
 	}
 
-	return os.WriteFile(f.filePath, data, 0600)
+	return statefile.Write(f.filePath, data)
 }
 
 // MemorySessionTracker provides an in-memory session tracker for isolated unit tests.

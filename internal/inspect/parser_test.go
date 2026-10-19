@@ -146,8 +146,7 @@ func TestReadOnlyRunner_Security(t *testing.T) {
 	}
 
 	// TestModeEnv kill switch
-	os.Setenv(inspect.TestModeEnv, "1")
-	defer os.Unsetenv(inspect.TestModeEnv)
+	t.Setenv(inspect.TestModeEnv, "1")
 
 	_, err := runner.Run(ctx, "pw-dump", "--no-colors")
 	if err != inspect.ErrTestModeExec {

@@ -22,6 +22,7 @@ import (
 	"github.com/toru/easy-profile-app/internal/adapters/easyeffects"
 	"github.com/toru/easy-profile-app/internal/adapters/pipewire"
 	"github.com/toru/easy-profile-app/internal/daemon"
+	"github.com/toru/easy-profile-app/internal/domain"
 	"github.com/toru/easy-profile-app/internal/inspect"
 )
 
@@ -77,8 +78,8 @@ commands:
   daemon                  run the background D-Bus daemon (org.easyprofile.Daemon)
   status                  query and display current audio routes, volume, mutes and presets
   route [akg|sp166|toggle] switch or toggle active audio destination
-  volume [+2|-2|<level>]  adjust or set output volume (0..100)
-  mic [+2|-2|<level>]     adjust or set microphone post-DSP level (0..100)
+  volume [+1|-1|<level>]  adjust or set output volume (0..100)
+  mic [+1|-1|<level>]     adjust or set microphone post-DSP level (0..100)
   mute [out|mic]          toggle mute on output or microphone (Dual-Mute)
   panic                   emergency mute all channels or restore previous state
   preset [list|<name>]    list compatible presets or apply a preset
@@ -88,7 +89,7 @@ commands:
 }
 
 func getDBusObject() (*dbus.Conn, dbus.BusObject, error) {
-	if _, test := os.LookupEnv("EASYPROFILE_TEST_MODE"); test && (os.Getenv("EASYPROFILE_PRIVATE_BUS") != "1" || os.Getenv("DBUS_SESSION_BUS_ADDRESS") == os.Getenv("EASYPROFILE_PARENT_BUS_ADDRESS")) {
+	if _, test := os.LookupEnv("EASYPROFILE_TEST_MODE"); test && !privateTestBus() {
 		return nil, nil, fmt.Errorf("test client requires private D-Bus integration harness")
 	}
 
@@ -100,7 +101,21 @@ func getDBusObject() (*dbus.Conn, dbus.BusObject, error) {
 	return conn, obj, nil
 }
 
-func runDaemon(args []string, stdout, stderr io.Writer) int {
+func privateTestBus() bool {
+	parent, address := os.Getenv("EASYPROFILE_PARENT_BUS_ADDRESS"), os.Getenv("DBUS_SESSION_BUS_ADDRESS")
+	return os.Getenv("EASYPROFILE_PRIVATE_BUS") == "1" && parent != "" && address != "" && parent != address
+}
+
+type daemonOptions struct {
+	fake        bool
+	control     bool
+	observe     bool
+	observeOnly bool
+	configPath  string
+	observeMode bool
+}
+
+func parseDaemonFlags(args []string, stderr io.Writer) (*daemonOptions, error) {
 	fs := flag.NewFlagSet("daemon", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	fake := fs.Bool("fake", false, "in-memory adapters (requires EASYPROFILE_TEST_MODE=1)")
@@ -108,23 +123,59 @@ func runDaemon(args []string, stdout, stderr io.Writer) int {
 	observe := fs.Bool("observe", false, "run in read-only observation mode without hardware writes")
 	observeOnly := fs.Bool("observe-only", false, "alias for --observe")
 	configPath := fs.String("config", "", "read hardware/preset config JSON (defaults to calibrated setup)")
-	if err := fs.Parse(args); err != nil || fs.NArg() != 0 {
+	if err := fs.Parse(args); err != nil {
+		return nil, err
+	}
+	if fs.NArg() != 0 {
+		return nil, fmt.Errorf("unexpected arguments: %v", fs.Args())
+	}
+	opts := &daemonOptions{
+		fake:        *fake,
+		control:     *control,
+		observe:     *observe,
+		observeOnly: *observeOnly,
+		configPath:  *configPath,
+	}
+	opts.observeMode = (*observe || *observeOnly || !*control) && !*fake
+	return opts, nil
+}
+
+func runDaemon(args []string, stdout, stderr io.Writer) int {
+	opts, err := parseDaemonFlags(args, stderr)
+	if err != nil {
 		return 2
 	}
-	if *fake && os.Getenv("EASYPROFILE_TEST_MODE") != "1" {
+	if opts.fake && os.Getenv("EASYPROFILE_TEST_MODE") != "1" {
 		fmt.Fprintln(stderr, "daemon --fake requires EASYPROFILE_TEST_MODE=1")
 		return 2
 	}
-	if _, test := os.LookupEnv("EASYPROFILE_TEST_MODE"); test && !*fake {
+	if _, test := os.LookupEnv("EASYPROFILE_TEST_MODE"); test && !opts.fake {
 		fmt.Fprintln(stderr, "test mode requires daemon --fake")
 		return 2
 	}
-	cfg, err := daemon.LoadConfig(*configPath)
+	if opts.fake && !privateTestBus() {
+		fmt.Fprintln(stderr, "fake daemon requires a private dbus-run-session harness")
+		return 2
+	}
+	// Acquire the process lock before loading mutable session state or touching audio.
+	// Fake daemons use the harness's private runtime directory, never the host lock.
+	lock, err := daemon.AcquireProcessLock(daemon.DefaultLockFilePath())
+	if err != nil {
+		fmt.Fprintln(stderr, "daemon lock:", err)
+		return 1
+	}
+	defer lock.Close()
+	cfg, err := daemon.LoadConfig(opts.configPath)
 	if err != nil {
 		fmt.Fprintln(stderr, "config:", err)
 		return 2
 	}
-	ctrl, err := cfg.Controller()
+	var ctrl *domain.AudioController
+	if opts.fake || opts.observeMode {
+		ctrl, err = cfg.Controller()
+	} else {
+		ctrl, err = cfg.ControllerWithSession(domain.NewSessionStore(daemon.DefaultSessionFilePath()), daemon.ResolveCurrentSessionID())
+	}
 	if err != nil {
 		fmt.Fprintln(stderr, "config:", err)
 		return 2
@@ -138,7 +189,7 @@ func runDaemon(args []string, stdout, stderr io.Writer) int {
 	var pw adapters.PipeWirePort
 	var al adapters.AlsaPort
 	var ee adapters.EasyEffectsPort
-	if *fake {
+	if opts.fake {
 		pw = pipewire.NewFakePipeWire()
 		al = alsa.NewFakeAlsa()
 		ee = easyeffects.NewFakeEasyEffects("AKG K52 - Uso diario aprovado", "AKG - Rock", "SP166 - Uso diario aprovado")
@@ -150,10 +201,10 @@ func runDaemon(args []string, stdout, stderr io.Writer) int {
 		ee = easyeffects.NewRealEasyEffects("", 3*time.Second)
 	}
 	d := daemon.NewDaemon(ctrl, pw, al, ee)
-	if *fake {
+	if opts.fake {
 		d.SetSessionTracker(daemon.NewMemorySessionTracker("fake-session"))
 	} else {
-		sessionPath := daemon.DefaultSessionFilePath()
+		sessionPath := daemon.DefaultLoginFilePath()
 		sessionID := daemon.ResolveCurrentSessionID()
 		d.SetSessionTracker(daemon.NewFileSessionTracker(sessionPath, sessionID))
 	}
@@ -163,8 +214,8 @@ func runDaemon(args []string, stdout, stderr io.Writer) int {
 		return 2
 	}
 	defer d.Close()
-	d.SetObserveOnly((*observe || *observeOnly || !*control) && !*fake)
-	if *fake {
+	d.SetObserveOnly(opts.observeMode)
+	if opts.fake {
 		d.SetStabilization(0)
 	}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
@@ -304,7 +355,7 @@ func runStatus(args []string, stdout, stderr io.Writer) int {
 
 func runVolume(args []string, stdout, stderr io.Writer) int {
 	if len(args) == 0 {
-		fmt.Fprintln(stderr, "usage: easyprofilectl volume [+2|-2|<level 0-100>]")
+		fmt.Fprintln(stderr, "usage: easyprofilectl volume [+1|-1|<level 0-100>]")
 		return 2
 	}
 	conn, obj, err := getDBusObject()
@@ -344,7 +395,7 @@ func runVolume(args []string, stdout, stderr io.Writer) int {
 
 func runMic(args []string, stdout, stderr io.Writer) int {
 	if len(args) == 0 {
-		fmt.Fprintln(stderr, "usage: easyprofilectl mic [+2|-2|<level 0-100>]")
+		fmt.Fprintln(stderr, "usage: easyprofilectl mic [+1|-1|<level 0-100>]")
 		return 2
 	}
 	conn, obj, err := getDBusObject()

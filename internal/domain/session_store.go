@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+
+	"github.com/toru/easy-profile-app/internal/statefile"
 )
 
 // PortSessionState tracks the session state of an output destination.
@@ -16,6 +18,8 @@ type PortSessionState struct {
 // SessionData represents the schema saved to disk in $XDG_STATE_HOME/easyprofile/session.json.
 type SessionData struct {
 	Version           int                                `json:"version"`
+	SessionID         string                             `json:"session_id,omitempty"`
+	Panic             PanicSnapshot                      `json:"panic"`
 	ActiveDestination DestinationID                      `json:"active_destination"`
 	OutputMuted       bool                               `json:"output_muted"`
 	MicLevelPct       int                                `json:"mic_level_pct"`
@@ -60,27 +64,18 @@ func (s *SessionStore) Load() (*SessionData, error) {
 	if err := json.Unmarshal(data, &session); err != nil {
 		return nil, fmt.Errorf("parsing session store JSON: %w", err)
 	}
+	if session.Version != 1 {
+		return nil, fmt.Errorf("unsupported session version %d", session.Version)
+	}
 	return &session, nil
 }
 
 // Save atomically writes session data to disk using a temporary file.
 func (s *SessionStore) Save(session *SessionData) error {
-	dir := filepath.Dir(s.filePath)
-	if err := os.MkdirAll(dir, 0755); err != nil {
-		return fmt.Errorf("creating session store dir: %w", err)
-	}
 	data, err := json.MarshalIndent(session, "", "  ")
 	if err != nil {
 		return fmt.Errorf("marshaling session data: %w", err)
 	}
 
-	tmpFile := s.filePath + ".tmp"
-	if err := os.WriteFile(tmpFile, data, 0644); err != nil {
-		return fmt.Errorf("writing session tmp file: %w", err)
-	}
-	if err := os.Rename(tmpFile, s.filePath); err != nil {
-		_ = os.Remove(tmpFile)
-		return fmt.Errorf("committing session file: %w", err)
-	}
-	return nil
+	return statefile.Write(s.filePath, data)
 }

@@ -11,6 +11,7 @@ import (
 	"github.com/toru/easy-profile-app/internal/domain"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -27,6 +28,9 @@ const (
 
 // DaemonStatus represents the complete serialized state broadcast to clients.
 type DaemonStatus struct {
+	DSPBound                bool            `json:"dsp_bound"`
+	MonitorVolumesConfirmed bool            `json:"monitor_volumes_confirmed"`
+	PhysicalMicrophone      string          `json:"physical_microphone"`
 	ObservedDestination     string          `json:"observed_destination"`
 	ObservedPreset          string          `json:"observed_preset"`
 	LastError               string          `json:"last_error"`
@@ -57,6 +61,7 @@ type DestinationInfo struct {
 
 type levelRequest struct {
 	value         int
+	destination   string
 	absolute, mic bool
 	result        int
 }
@@ -82,6 +87,7 @@ type Daemon struct {
 	ee                 adapters.EasyEffectsPort
 	conn               *dbus.Conn
 	status             DaemonStatus
+	statusJSON         atomic.Value // immutable string; GetStatus never takes the hardware lock
 	observeOnly        bool
 	stabilization      time.Duration
 	sessionTracker     SessionTracker
@@ -155,7 +161,7 @@ func (d *Daemon) worker() {
 		if r.level != nil && !r.panic {
 			for len(d.queue) > 0 {
 				next := d.queue[0]
-				if next.level == nil || next.panic || next.level.mic != r.level.mic {
+				if next.level == nil || next.panic || next.level.mic != r.level.mic || next.level.destination != r.level.destination {
 					break
 				}
 				group = append(group, next)
@@ -183,14 +189,19 @@ func (d *Daemon) worker() {
 					current = domain.NewPercentageLevel(current + level.value).Percent()
 				}
 			}
-			result, applyErr := d.applyVolume(ctx, current, r.level.mic)
-			err = applyErr
+			result := 0
+			if r.level.destination != "" && r.level.destination != string(d.ctrl.ActiveDestination().ID) {
+				err = errors.New("stale volume destination; request discarded")
+			} else {
+				result, err = d.applyVolume(ctx, current, r.level.mic)
+			}
 			for _, member := range group {
 				member.level.result = result
 			}
 		} else {
 			err = r.fn(ctx)
 		}
+		err = errors.Join(err, d.ctrl.PersistenceError())
 		d.updateStatus(err)
 		d.emit()
 		d.mu.Unlock()
@@ -231,7 +242,8 @@ func (d *Daemon) Export(conn *dbus.Conn) error {
 	// Export only the public API: lifecycle/configuration methods must never be callable over IPC.
 	methods := map[string]interface{}{
 		"GetStatus": d.GetStatus, "SetVolume": d.SetVolume, "SetVolumeAbsolute": d.SetVolumeAbsolute,
-		"SetMicVolume": d.SetMicVolume, "SetMicVolumeAbsolute": d.SetMicVolumeAbsolute,
+		"SetVolumeForDestination": d.SetVolumeForDestination,
+		"SetMicVolume":            d.SetMicVolume, "SetMicVolumeAbsolute": d.SetMicVolumeAbsolute,
 		"ToggleOutputMute": d.ToggleOutputMute, "ToggleMicMute": d.ToggleMicMute, "TogglePanic": d.TogglePanic,
 		"SelectDestination": d.SelectDestination, "ToggleDestination": d.ToggleDestination, "SelectPreset": d.SelectPreset,
 		"ResetDefaults": d.ResetDefaults, "GetRawMicStreams": d.GetRawMicStreams, "MigrateRawMicStream": d.MigrateRawMicStream,
@@ -251,6 +263,7 @@ func (d *Daemon) Export(conn *dbus.Conn) error {
 	return conn.Export(introspect.NewIntrospectable(node), dbus.ObjectPath(DBusPath), "org.freedesktop.DBus.Introspectable")
 }
 func (d *Daemon) updateStatus(err error) {
+	err = errors.Join(err, d.ctrl.PersistenceError())
 	dest := d.ctrl.ActiveDestination()
 	mic := d.ctrl.Microphone()
 	d.status.ActiveDestination = DestinationInfo{string(dest.ID), dest.Label, dest.RouteName, dest.PhysicalCeiling.Percent()}
@@ -276,6 +289,9 @@ func (d *Daemon) updateStatus(err error) {
 	if err == nil && d.ctrl.PanicState().Active && !d.panicSnapshotKnown {
 		err = errors.New("panic snapshot incomplete; automatic restore unavailable")
 	}
+	if err == nil && (!d.status.DSPBound || !d.status.MonitorVolumesConfirmed) {
+		err = errors.New("DSP graph or monitor gain is not confirmed")
+	}
 	d.status.LastError = ""
 	if err != nil {
 		d.status.LastError = err.Error()
@@ -289,6 +305,16 @@ func (d *Daemon) updateStatus(err error) {
 	if err != nil {
 		d.status.ProtectionState = "degraded"
 	}
+	d.publishStatus()
+}
+
+func (d *Daemon) publishStatus() {
+	data, err := json.Marshal(d.status)
+	if err != nil {
+		d.statusJSON.Store(`{"protection_state":"degraded","last_error":"status encoding failed"}`)
+		return
+	}
+	d.statusJSON.Store(string(data))
 }
 func (d *Daemon) emit() {
 	if d.conn == nil {
@@ -301,6 +327,8 @@ func (d *Daemon) emit() {
 	}
 	if err := d.conn.Emit(dbus.ObjectPath(DBusPath), DBusInterface+".StateChanged", string(data)); err != nil {
 		d.status.LastError = err.Error()
+		d.status.ProtectionState = "degraded"
+		d.publishStatus()
 	}
 }
 func (d *Daemon) control() error {
@@ -310,6 +338,11 @@ func (d *Daemon) control() error {
 	return nil
 }
 func (d *Daemon) refresh(ctx context.Context) error {
+	graph, graphErr := d.pw.ReadGraphState(ctx, d.hardware.VirtualSink, d.hardware.VirtualSource, d.ctrl.ActiveDestination().PhysicalSinkName, d.hardware.PhysicalMicrophonePrefix)
+	devices, devicesErr := d.ee.ReadDevices(ctx)
+	d.status.PhysicalMicrophone = graph.PhysicalMicrophone
+	d.status.DSPBound = graphErr == nil && devicesErr == nil && graph.PhysicalMicrophone != "" && graph.DefaultSink == d.hardware.VirtualSink && graph.ConfiguredSink == d.hardware.VirtualSink && devices.Input == graph.PhysicalMicrophone && devices.Output == d.ctrl.ActiveDestination().PhysicalSinkName && !devices.UseDefaultInput && !devices.UseDefaultOutput
+	d.status.MonitorVolumesConfirmed = graphErr == nil && graph.SinkMonitorVolumes && graph.SourceMonitorVolumes
 	presets, e1 := d.ee.ListAvailablePresets(ctx)
 	if e1 == nil {
 		d.presets = presets
@@ -331,7 +364,7 @@ func (d *Daemon) refresh(ctx context.Context) error {
 	d.status.ObservedDestination = route
 	preset, presetErr := d.ee.GetActivePreset(ctx)
 	d.status.ObservedPreset = preset
-	return errors.Join(e1, e2, routeErr, presetErr, read(d.hardware.VirtualSink, &d.status.ObservedOutputMute), read(d.hardware.VirtualSource, &d.status.ObservedMicVirtualMute), read(d.hardware.PhysicalMicrophonePrefix, &d.status.ObservedMicPhysicalMute))
+	return errors.Join(graphErr, devicesErr, e1, e2, routeErr, presetErr, read(d.hardware.VirtualSink, &d.status.ObservedOutputMute), read(d.hardware.VirtualSource, &d.status.ObservedMicVirtualMute), read(d.hardware.PhysicalMicrophonePrefix, &d.status.ObservedMicPhysicalMute))
 }
 
 // Observe refreshes graph-dependent alerts and observed mutes without modifying hardware.
@@ -340,11 +373,16 @@ func (d *Daemon) Observe() *dbus.Error {
 }
 func (d *Daemon) InitHardware(ctx context.Context) error {
 	returnErr := d.execute(false, func(c context.Context) error {
+		c, cancel := context.WithCancel(c)
+		stop := context.AfterFunc(ctx, cancel)
+		defer func() { stop(); cancel() }()
 		if err := ctx.Err(); err != nil {
 			return err
 		}
-		if err := d.refresh(c); err != nil {
-			return err
+		// Read-only discovery may find a broken preset/device binding that startup repairs.
+		initialErr := d.refresh(c)
+		if d.status.ObservedOutputMute == nil || d.status.ObservedMicVirtualMute == nil || d.status.ObservedMicPhysicalMute == nil || d.status.PhysicalMicrophone == "" {
+			return errors.Join(initialErr, errors.New("initial mute/USB identity readback incomplete"))
 		}
 
 		route, err := d.pw.GetSinkPort(c, d.ctrl.ActiveDestination().PhysicalSinkName)
@@ -365,30 +403,50 @@ func (d *Daemon) InitHardware(ctx context.Context) error {
 		if target == domain.DestUnknown {
 			return fmt.Errorf("unsupported active route %q", route)
 		}
-		if _, _, err := d.ctrl.SwitchDestination(target); err != nil {
-			return err
+		if d.observeOnly {
+			_, _, err := d.ctrl.SwitchDestination(target)
+			return errors.Join(initialErr, err)
 		}
 
 		applyLogin := false
 		if d.sessionTracker != nil {
 			should, sErr := d.sessionTracker.ShouldApplyLoginPolicy()
-			if sErr == nil && should {
-				applyLogin = true
+			if sErr != nil {
+				return sErr
 			}
+			applyLogin = should
+		}
+		if !applyLogin && !d.ctrl.SessionStateAvailable() {
+			return errors.New("session snapshot missing; refusing to apply default gains on restart")
+		}
+		if applyLogin {
+			if d.ctrl.HasRestoredSession() {
+				return errors.New("login marker inconsistent with existing session snapshot; automatic unmute refused")
+			}
+			if err := d.sessionTracker.MarkLoginPolicyApplied(); err != nil {
+				return fmt.Errorf("record login policy: %w", err)
+			}
+		}
+		if _, _, err := d.ctrl.SwitchDestination(target); err != nil {
+			return err
 		}
 
 		if applyLogin {
+			// Consume the one-time login permission durably BEFORE any automatic unmute.
+			// If hardware later fails, a restart preserves observed privacy instead of retrying unmute.
 			// LOGIN POLICY (ARCHITECTURE_AND_REQUIREMENTS.md):
 			// Output: Daily base preset, volume 95%, unmuted
 			// Mic: level 100%, unmuted (both virtual and physical)
-			d.ctrl.SetOutputVolume(domain.NewPercentageLevel(95))
+			d.ctrl.ResetToDailyBase()
 			d.ctrl.SetMicrophoneState(false, false, domain.NewPercentageLevel(100))
 			if d.ctrl.OutputMuted() {
 				d.ctrl.ToggleOutputMute()
 			}
 			dest := d.ctrl.ActiveDestination()
 			if dest.BasePreset != "" {
-				_ = d.ctrl.SelectOutputPreset(dest.BasePreset)
+				if err := d.ctrl.SelectOutputPreset(dest.BasePreset); err != nil {
+					return err
+				}
 			}
 		} else {
 			// RESTART WITHIN SAME SESSION:
@@ -399,20 +457,13 @@ func (d *Daemon) InitHardware(ctx context.Context) error {
 			}
 		}
 
-		if d.observeOnly {
-			if applyLogin && d.sessionTracker != nil {
-				_ = d.sessionTracker.MarkLoginPolicyApplied()
-			}
-			return nil
+		if err := d.ctrl.PersistenceError(); err != nil {
+			return err
 		}
-
 		if err := d.applyDestination(c, d.ctrl.ActiveDestination()); err != nil {
 			return err
 		}
-		if applyLogin && d.sessionTracker != nil {
-			_ = d.sessionTracker.MarkLoginPolicyApplied()
-		}
-		return nil
+		return d.refresh(c)
 	})
 	if returnErr != nil {
 		return errors.New(returnErr.Error())
@@ -481,6 +532,9 @@ func (d *Daemon) applyDestination(ctx context.Context, dest *domain.Destination)
 	if err = d.alsa.EnsureAutoMuteDisabled(ctx, d.hardware.AlsaCard); err != nil {
 		return err
 	}
+	if err = d.ensureDSPBindings(ctx, dest); err != nil {
+		return err
+	}
 	// Initialize virtual levels before enabling monitor gain; the live inspector may find an old request above 100%.
 	for _, target := range []struct {
 		node   string
@@ -499,7 +553,13 @@ func (d *Daemon) applyDestination(ctx context.Context, dest *domain.Destination)
 	var route string
 	var readErr error
 	for attempt := 0; attempt < 10; attempt++ {
-		time.Sleep(50 * time.Millisecond)
+		timer := time.NewTimer(50 * time.Millisecond)
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			return ctx.Err()
+		case <-timer.C:
+		}
 		route, readErr = d.pw.GetSinkPort(ctx, dest.PhysicalSinkName)
 		if readErr == nil && route == dest.RouteName {
 			break
@@ -553,16 +613,30 @@ func (d *Daemon) applyDestination(ctx context.Context, dest *domain.Destination)
 	if err = d.alsa.SetControl(ctx, d.hardware.AlsaCard, dest.AlsaInactiveControl, 0, true); err != nil {
 		return err
 	}
+	if err = d.refresh(ctx); err != nil {
+		return err
+	}
+	if !d.status.DSPBound || !d.status.MonitorVolumesConfirmed {
+		return errors.New("DSP chain not confirmed; hardware remains muted")
+	}
 	return d.mute(ctx, dest.PhysicalSinkName, d.ctrl.OutputMuted(), nil)
 }
-func (d *Daemon) GetStatus() (string, *dbus.Error) {
-	d.mu.Lock()
-	defer d.mu.Unlock()
-	data, err := json.Marshal(d.status)
+
+func (d *Daemon) ensureDSPBindings(ctx context.Context, dest *domain.Destination) error {
+	graph, err := d.pw.ReadGraphState(ctx, d.hardware.VirtualSink, d.hardware.VirtualSource, dest.PhysicalSinkName, d.hardware.PhysicalMicrophonePrefix)
 	if err != nil {
-		return "", dbus.MakeFailedError(err)
+		return err
 	}
-	return string(data), nil
+	if graph.PhysicalMicrophone == "" {
+		return errors.New("physical microphone identity unresolved")
+	}
+	if err := d.ee.EnsureDevices(ctx, dest.PhysicalSinkName, graph.PhysicalMicrophone); err != nil {
+		return err
+	}
+	return d.pw.EnsureDefaultSink(ctx, d.hardware.VirtualSink)
+}
+func (d *Daemon) GetStatus() (string, *dbus.Error) {
+	return d.statusJSON.Load().(string), nil
 }
 func (d *Daemon) applyVolume(ctx context.Context, target int, mic bool) (int, error) {
 	if err := d.control(); err != nil {
@@ -602,6 +676,16 @@ func (d *Daemon) SetVolume(v int32) (int32, *dbus.Error) {
 func (d *Daemon) SetVolumeAbsolute(v int32) (int32, *dbus.Error) {
 	n, e := d.volume(int(v), true, false)
 	return int32(n), e
+}
+
+// SetVolumeForDestination prevents a delayed UI call from changing another route.
+func (d *Daemon) SetVolumeForDestination(destination string, v int32) (int32, *dbus.Error) {
+	if destination != "akg" && destination != "sp166" {
+		return 0, dbus.MakeFailedError(domain.ErrUnknownDestination)
+	}
+	level := &levelRequest{value: int(v), absolute: true, destination: destination}
+	err := d.submit(&request{level: level, created: time.Now(), done: make(chan error, 1)})
+	return int32(level.result), err
 }
 func (d *Daemon) SetMicVolume(v int32) (int32, *dbus.Error) {
 	n, e := d.volume(int(v), false, true)
@@ -768,7 +852,26 @@ func (d *Daemon) Reconcile() *dbus.Error {
 			return errors.Join(err, confirmErr)
 		}
 		if d.status.ObservedDestination != d.ctrl.ActiveDestination().RouteName {
-			return errors.Join(err, errors.New("external output route changed; select destination explicitly"))
+			return errors.Join(err, d.pw.SetNodeMute(ctx, d.ctrl.ActiveDestination().PhysicalSinkName, true), errors.New("external output route changed; select destination explicitly"))
+		}
+		if d.status.ObservedMicVirtualMute == nil || d.status.ObservedMicPhysicalMute == nil || d.status.ObservedOutputMute == nil {
+			return errors.Join(err, d.pw.SetNodeMute(ctx, d.ctrl.ActiveDestination().PhysicalSinkName, true),
+				d.pw.SetNodeMute(ctx, d.hardware.PhysicalMicrophonePrefix, true), errors.New("mute observation incomplete; fail-safe mute requested"))
+		}
+		// Background repair may add privacy, but must never authorize a new unmute.
+		mic := d.ctrl.Microphone()
+		d.ctrl.SetMicrophoneState(mic.VirtualMuted || *d.status.ObservedMicVirtualMute, mic.PhysicalMuted || *d.status.ObservedMicPhysicalMute, mic.PostDSPLevel)
+		if *d.status.ObservedOutputMute && !d.ctrl.OutputMuted() {
+			d.ctrl.ToggleOutputMute()
+		}
+		if !d.status.DSPBound || !d.status.MonitorVolumesConfirmed {
+			if repairErr := d.applyDestination(ctx, d.ctrl.ActiveDestination()); repairErr != nil {
+				return errors.Join(err, repairErr)
+			}
+		} else if *d.status.ObservedMicVirtualMute != d.ctrl.Microphone().VirtualMuted || *d.status.ObservedMicPhysicalMute != d.ctrl.Microphone().PhysicalMuted || *d.status.ObservedOutputMute != d.ctrl.OutputMuted() {
+			if muteErr := d.applyMutes(ctx); muteErr != nil {
+				return errors.Join(err, muteErr)
+			}
 		}
 		active, readErr := d.ee.GetActivePreset(ctx)
 		if readErr != nil || active != d.ctrl.ActiveOutputPreset() {
@@ -776,9 +879,8 @@ func (d *Daemon) Reconcile() *dbus.Error {
 				return errors.Join(err, loadErr)
 			}
 		}
-		confirmed, confirmErr := d.ee.GetActivePreset(ctx)
-		d.status.ObservedPreset = confirmed
-		return errors.Join(err, confirmErr)
+		// Return the final readback: a successfully repaired initial mismatch is no longer an error.
+		return d.refresh(ctx)
 	})
 }
 

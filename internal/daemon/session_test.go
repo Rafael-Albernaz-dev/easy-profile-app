@@ -1,6 +1,7 @@
 package daemon
 
 import (
+	"os"
 	"path/filepath"
 	"testing"
 )
@@ -39,6 +40,31 @@ func TestMemorySessionTracker(t *testing.T) {
 	}
 	if !should {
 		t.Errorf("expected ShouldApplyLoginPolicy to be true after switching to new session")
+	}
+}
+
+func TestLoginMarkerUnreadableAndUnknownIdentityFailClosed(t *testing.T) {
+	directory := t.TempDir()
+	tracker := NewFileSessionTracker(directory, "session-1")
+	if should, err := tracker.ShouldApplyLoginPolicy(); should || err == nil {
+		t.Fatal("unreadable marker authorized unmute")
+	}
+	if err := tracker.MarkLoginPolicyApplied(); err == nil {
+		t.Fatal("failed atomic rename ignored")
+	}
+	t.Setenv("XDG_SESSION_ID", "")
+	t.Setenv("SESSION_MANAGER", "")
+	t.Setenv("WAYLAND_DISPLAY", "wayland-0")
+	t.Setenv("DBUS_SESSION_BUS_ADDRESS", "unix:path=/run/user/1000/bus")
+	unknown := NewFileSessionTracker(filepath.Join(directory, "missing.json"), "")
+	if should, err := unknown.ShouldApplyLoginPolicy(); should || err == nil {
+		t.Fatal("reused socket path authorized unmute")
+	}
+	if err := unknown.MarkLoginPolicyApplied(); err == nil {
+		t.Fatal("unknown identity recorded")
+	}
+	if _, err := os.Stat(filepath.Join(directory, "missing.json")); !os.IsNotExist(err) {
+		t.Fatal("failed marker wrote a file")
 	}
 }
 

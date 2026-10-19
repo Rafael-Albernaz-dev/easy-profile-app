@@ -210,7 +210,8 @@ func (r *RealEasyEffects) Watch(ctx context.Context, events chan<- struct{}) err
 	if err := r.checkTestMode(); err != nil {
 		return err
 	}
-	cmd := exec.CommandContext(ctx, "gsettings", "monitor", "com.github.wwmm.easyeffects")
+	// Watch the root and both device schemas, including USB reconnect corrections.
+	cmd := exec.CommandContext(ctx, "dconf", "watch", "/com/github/wwmm/easyeffects/")
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
 		return err
