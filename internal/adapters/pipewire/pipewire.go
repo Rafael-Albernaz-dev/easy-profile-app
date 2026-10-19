@@ -522,15 +522,19 @@ func (r *RealPipeWire) SetMicrophonePrefix(prefix string) {
 func (r *RealPipeWire) invalidateObject(id int) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	invalidated := false
 	for name, cached := range r.nodeIDCache {
 		if cached == id {
 			delete(r.nodeIDCache, name)
 			delete(r.cacheSerials, name)
 			delete(r.monitorVolumes, name)
+			invalidated = true
 		}
 	}
-	r.monitorVolumes = make(map[string]bool)
-	r.cacheGeneration++
+	if invalidated {
+		r.monitorVolumes = make(map[string]bool)
+		r.cacheGeneration++
+	}
 }
 
 // Fresh snapshots also detect changes missed while a watcher was disconnected.
