@@ -84,7 +84,7 @@ commands:
   mic [+1|-1|<level>]     adjust or set microphone post-DSP level (0..100)
   mute [out|mic]          toggle mute on output or microphone (Dual-Mute)
   panic                   emergency mute all channels or restore previous state
-  preset [list|<name>]    list compatible presets or apply a preset
+  preset [list|next|prev|base|<name>] list, cycle or apply a compatible equalizer preset
   reset                   restore daily base preset, output 95%, mic 100% (preserves mic mute)
   listen [on|off|toggle]  toggle or set mic monitoring (listening with DSP filters)
   inspect                 read-only inspection of PipeWire, ALSA, and EasyEffects
@@ -584,7 +584,7 @@ func runRoute(args []string, stdout, stderr io.Writer) int {
 
 func runPreset(args []string, stdout, stderr io.Writer) int {
 	if len(args) == 0 {
-		fmt.Fprintln(stderr, "usage: easyprofilectl preset [list|<preset-name>]")
+		fmt.Fprintln(stderr, "usage: easyprofilectl preset [list|next|prev|base|<preset-name>]")
 		return 2
 	}
 	conn, obj, err := getDBusObject()
@@ -614,6 +614,47 @@ func runPreset(args []string, stdout, stderr io.Writer) int {
 			}
 			fmt.Fprintf(stdout, "  %s%s\n", marker, p)
 		}
+		return 0
+	}
+
+	if args[0] == "next" || args[0] == "prev" || args[0] == "previous" || args[0] == "base" {
+		var raw string
+		if err := busCall(obj, daemon.DBusInterface+".GetStatus", 0).Store(&raw); err != nil {
+			fmt.Fprintf(stderr, "preset %s failed: %v\n", args[0], err)
+			return 1
+		}
+		var s daemon.DaemonStatus
+		if err := json.Unmarshal([]byte(raw), &s); err != nil {
+			fmt.Fprintln(stderr, err)
+			return 1
+		}
+		if len(s.AvailablePresets) == 0 {
+			fmt.Fprintln(stderr, "no compatible presets available")
+			return 1
+		}
+		var target string
+		if args[0] == "base" {
+			target = s.AvailablePresets[0]
+		} else {
+			delta := 1
+			if args[0] == "prev" || args[0] == "previous" {
+				delta = -1
+			}
+			idx := 0
+			for i, p := range s.AvailablePresets {
+				if p == s.ActivePreset {
+					idx = i
+					break
+				}
+			}
+			nextIdx := (idx + delta + len(s.AvailablePresets)) % len(s.AvailablePresets)
+			target = s.AvailablePresets[nextIdx]
+		}
+		if err := busCall(obj, daemon.DBusInterface+".SelectPreset", 0, target).Err; err != nil {
+			fmt.Fprintf(stderr, "select preset failed: %v\n", err)
+			return 1
+		}
+		fmt.Fprintf(stdout, "Applied preset: %s\n", target)
 		return 0
 	}
 

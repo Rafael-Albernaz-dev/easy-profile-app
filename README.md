@@ -28,9 +28,9 @@ Automated tests use in-memory audio adapters with `EASYPROFILE_TEST_MODE=1`. No 
 | `1` | Select AKG K52; focus output | No |
 | `2` | Select SP166; focus output | No |
 | `3` | Toggle volume focus between output and microphone | No |
-| `4` | Select compatible preset 1 for the active output | No |
-| `5` | Select compatible preset 2 for the active output | No |
-| `6` | Select compatible preset 3 for the active output | No |
+| `4` | Select base preset (`BasePreset` / daily approved profile) for the active output | No |
+| `5` | Previous preset (circular cycle through all compatible presets) | No |
+| `6` | Next preset (circular cycle through all compatible presets) | No |
 | `0` | Microphone dual-mute; red panel icon indicates mic mute state | No |
 | `.` / `,` | Output mute (`KP_Decimal` / `KP_Separator`) | No |
 | `Enter` | Panic: output and microphone mute; toggle restores independent snapshot | No |
@@ -98,7 +98,10 @@ easyprofilectl listen toggle
 easyprofilectl route akg
 easyprofilectl route sp166
 easyprofilectl preset list
-easyprofilectl preset "AKG - Rock"
+easyprofilectl preset next
+easyprofilectl preset prev
+easyprofilectl preset base
+easyprofilectl preset "SP166 - 20 Jazz Aberto - Aprovado"
 easyprofilectl reset
 ```
 

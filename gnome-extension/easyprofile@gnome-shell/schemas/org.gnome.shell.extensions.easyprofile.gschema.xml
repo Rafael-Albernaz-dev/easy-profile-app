@@ -25,18 +25,18 @@
       <summary>Selecionar Microfone para ajuste com +/-</summary>
     </key>
 
-    <!-- Presets 1, 2, 3 (IGNORE_AUTOREPEAT) -->
+    <!-- Presets Navigation: 4 = Base, 5 = Previous, 6 = Next (IGNORE_AUTOREPEAT) -->
     <key name="shortcut-preset-1" type="as">
       <default><![CDATA[['KP_4']]]></default>
-      <summary>Selecionar Preset 1 do dispositivo ativo</summary>
+      <summary>Selecionar Preset Base do dispositivo ativo</summary>
     </key>
     <key name="shortcut-preset-2" type="as">
       <default><![CDATA[['KP_5']]]></default>
-      <summary>Selecionar Preset 2 do dispositivo ativo</summary>
+      <summary>Preset Anterior do dispositivo ativo</summary>
     </key>
     <key name="shortcut-preset-3" type="as">
       <default><![CDATA[['KP_6']]]></default>
-      <summary>Selecionar Preset 3 do dispositivo ativo</summary>
+      <summary>Próximo Preset do dispositivo ativo</summary>
     </key>
 
     <!-- Toggles & Mutes (IGNORE_AUTOREPEAT) -->

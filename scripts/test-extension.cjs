@@ -112,8 +112,20 @@ function extension() {
     bindings.get('shortcut-select-mic').handler(); assert.equal(e._targetChannel, 'mic');
     for (const name of ['shortcut-noop-8', 'shortcut-noop-9']) bindings.get(name).handler();
     assert.equal(actions.length, 3);
+    e._status.available_presets = ['Preset Base', 'Preset 2', 'Preset 3'];
+    e._status.active_preset = 'Preset 2';
+    bindings.get('shortcut-preset-1').handler(); // Base Preset
+    assert.equal(actions[3][0], 'SelectPreset');
+    assert.deepEqual(Array.from(actions[3][1]), ['Preset Base']);
+    bindings.get('shortcut-preset-2').handler(); // Prev Preset from Preset 2
+    assert.equal(actions[4][0], 'SelectPreset');
+    assert.deepEqual(Array.from(actions[4][1]), ['Preset Base']);
+    bindings.get('shortcut-preset-3').handler(); // Next Preset from Preset 2
+    assert.equal(actions[5][0], 'SelectPreset');
+    assert.deepEqual(Array.from(actions[5][1]), ['Preset 3']);
+    assert.equal(actions.length, 6);
     e._keymap.get_num_lock_state = () => false;
-    bindings.get('shortcut-mute-panic').handler(); assert.equal(actions.length, 3);
+    bindings.get('shortcut-mute-panic').handler(); assert.equal(actions.length, 6);
     e._unregisterKeybindings(); assert.equal(bindings.size, 0);
 }
 console.log('Extension regressions passed: destination/reset barriers, late signals/errors, lifecycle, NumLock and repeat flags.');

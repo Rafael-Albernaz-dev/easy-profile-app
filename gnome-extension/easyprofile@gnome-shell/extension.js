@@ -367,7 +367,10 @@ export default class EasyProfileExtension extends Extension {
                 } else if (presetChanged) {
                     const isAKG = s.active_destination?.id === 'akg';
                     const icon = isAKG ? 'audio-headphones-symbolic' : 'audio-speakers-symbolic';
-                    this._showOSD(`Preset: ${s.active_preset}\n(${s.active_destination?.display_name || ''})`, icon, 2000);
+                    const presets = s.available_presets || [];
+                    const idx = presets.indexOf(s.active_preset);
+                    const counter = idx >= 0 ? ` (${idx + 1}/${presets.length})` : '';
+                    this._showOSD(`🎛️ Preset${counter}\n${s.active_preset}`, icon, 2000);
                 }
             }
 
@@ -470,6 +473,38 @@ export default class EasyProfileExtension extends Extension {
             if (target && target !== this._status?.active_preset) {
                 this._callDBus('SelectPreset', [target]);
             }
+        }
+    }
+
+    _selectBasePreset() {
+        const presets = this._status?.available_presets;
+        if (!presets || presets.length === 0) return;
+        const basePreset = presets[0];
+        if (this._status?.active_preset !== basePreset) {
+            this._callDBus('SelectPreset', [basePreset]);
+        } else {
+            const isAKG = this._status?.active_destination?.id === 'akg';
+            const icon = isAKG ? 'audio-headphones-symbolic' : 'audio-speakers-symbolic';
+            this._showOSD(`🎛️ Preset Base (já ativo)\n${basePreset}`, icon, 2000);
+        }
+    }
+
+    _cyclePreset(delta) {
+        const presets = this._status?.available_presets;
+        if (!presets || presets.length === 0) return;
+        const isAKG = this._status?.active_destination?.id === 'akg';
+        const icon = isAKG ? 'audio-headphones-symbolic' : 'audio-speakers-symbolic';
+        if (presets.length === 1) {
+            this._showOSD(`🎛️ Preset Único (1/1)\n${presets[0]}`, icon, 2000);
+            return;
+        }
+        const current = this._status?.active_preset;
+        let idx = presets.indexOf(current);
+        if (idx === -1) idx = 0;
+        const nextIdx = (idx + delta + presets.length) % presets.length;
+        const target = presets[nextIdx];
+        if (target) {
+            this._callDBus('SelectPreset', [target]);
         }
     }
 
@@ -672,19 +707,19 @@ export default class EasyProfileExtension extends Extension {
                 this._updateLabel();
             }},
 
-            // 10) TECLA "4": primeiro preset do dispositivo de saída ativo
+            // 10) TECLA "4": Preset Base (Padrão Diário Aprovado)
             {name: 'shortcut-preset-1', flags: noRepeat, handler: () => {
-                this._selectPresetByIndex(0);
+                this._selectBasePreset();
             }},
 
-            // 11) TECLA "5": segundo preset do dispositivo de saída ativo
+            // 11) TECLA "5": Preset Anterior (Circular)
             {name: 'shortcut-preset-2', flags: noRepeat, handler: () => {
-                this._selectPresetByIndex(1);
+                this._cyclePreset(-1);
             }},
 
-            // 12) TECLA "6": terceiro preset do dispositivo de saída ativo
+            // 12) TECLA "6": Próximo Preset (Circular)
             {name: 'shortcut-preset-3', flags: noRepeat, handler: () => {
-                this._selectPresetByIndex(2);
+                this._cyclePreset(1);
             }},
 
             // 5) TECLA "0": muta/desmuta microfone (Dual-Mute)
