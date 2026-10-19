@@ -104,7 +104,9 @@ func runDaemon(args []string, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet("daemon", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	fake := fs.Bool("fake", false, "in-memory adapters (requires EASYPROFILE_TEST_MODE=1)")
-	control := fs.Bool("control", false, "enable hardware writes; default is observe-only")
+	control := fs.Bool("control", true, "enable hardware writes (default true)")
+	observe := fs.Bool("observe", false, "run in read-only observation mode without hardware writes")
+	observeOnly := fs.Bool("observe-only", false, "alias for --observe")
 	configPath := fs.String("config", "", "read hardware/preset config JSON (defaults to calibrated setup)")
 	if err := fs.Parse(args); err != nil || fs.NArg() != 0 {
 		return 2
@@ -161,7 +163,7 @@ func runDaemon(args []string, stdout, stderr io.Writer) int {
 		return 2
 	}
 	defer d.Close()
-	d.SetObserveOnly(!*control && !*fake)
+	d.SetObserveOnly((*observe || *observeOnly || !*control) && !*fake)
 	if *fake {
 		d.SetStabilization(0)
 	}

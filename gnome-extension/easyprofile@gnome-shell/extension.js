@@ -338,7 +338,8 @@ export default class EasyProfileExtension extends Extension {
             if (!this._enabled || generation !== this._generation) return;
             if (owner !== this._proxy?.g_name_owner) { done?.(); return; }
             if (error) {
-                this._showOSD(`Falha: ${error.message}`, 'dialog-error-symbolic');
+                const msg = error.message.replace(/^GDBus\.Error:[a-zA-Z0-9_.]+: /, '');
+                this._showOSD(`Falha: ${msg}`, 'dialog-error-symbolic');
                 done?.();
                 return;
             }
