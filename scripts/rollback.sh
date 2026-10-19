@@ -1,78 +1,30 @@
 #!/usr/bin/env bash
-# scripts/rollback.sh — Restauração Imediata do Setup Anterior (Slice EP-006)
-set -euo pipefail
-
+# Restore precisely the recorded state; never invent an enable/start fallback.
+set -Eeuo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
+source "${SCRIPT_DIR}/release-common.sh"
+check_release_test_mode
 BACKUP_FILE="${HOME}/.local/state/easyprofile/guards-backup.json"
-
-DRY_RUN=0
-if [[ "${1:-}" == "--dry-run" ]]; then
-    DRY_RUN=1
-    echo "🔍 Mode: DRY-RUN (simulação sem alterar serviços ativos)"
-fi
-
-echo "=========================================================="
-echo "⏪ EasyProfileApp — Rollback de Emergência"
-echo "=========================================================="
-
-if [[ ${DRY_RUN} -eq 1 ]]; then
-    echo "[DRY-RUN] Verificando existência de backup e sintaxe..."
-    if [[ -f "${BACKUP_FILE}" ]]; then
-        echo "✓ Backup encontrado: ${BACKUP_FILE}"
-        python3 -c "import json; data=json.load(open('${BACKUP_FILE}')); print('Backup data valid:', data)"
-    else
-        echo "⚠️ Nenhum backup encontrado em ${BACKUP_FILE} (usaria fallback padrão)"
-    fi
-    echo "✓ [DRY-RUN] Simulação concluída com sucesso."
+case "${1:-}" in --dry-run) DRY_RUN=1 ;; '') DRY_RUN=0 ;; *) echo 'usage: rollback.sh [--dry-run]' >&2; exit 2 ;; esac
+[[ $# -le 1 ]]
+# Validate before touching services; a missing/corrupt backup authorizes no changes.
+SAVED="$(python3 "${SCRIPT_DIR}/release-state.py" read "$BACKUP_FILE")"
+if [[ $DRY_RUN == 1 ]]; then
+    verify_presets
+    printf 'Dry-run: validated rollback snapshot; no writes.\n%s\n' "$SAVED"
     exit 0
 fi
-
-# 1. Stop and disable easyprofiled
-echo "[1/4] Interrompendo e desabilitando easyprofiled.service..."
-systemctl --user stop easyprofiled.service 2>/dev/null || true
-systemctl --user disable easyprofiled.service 2>/dev/null || true
-
-# 2. Disable GNOME Shell extension
-echo "[2/4] Desativando extensão GNOME Shell..."
-gnome-extensions disable easyprofile@gnome-shell 2>/dev/null || true
-
-# 3. Restore legacy guards from backup
-echo "[3/4] Restaurando guards de produção anteriores..."
-if [[ -f "${BACKUP_FILE}" ]]; then
-    echo "Lendo backup de ${BACKUP_FILE}..."
-    KA_ACTIVE="$(python3 -c "import json; print(json.load(open('${BACKUP_FILE}'))['ka1333_input_guard']['active'])")"
-    KA_ENABLED="$(python3 -c "import json; print(json.load(open('${BACKUP_FILE}'))['ka1333_input_guard']['enabled'])")"
-    EE_ACTIVE="$(python3 -c "import json; print(json.load(open('${BACKUP_FILE}'))['easyeffects_output_guard']['active'])")"
-    EE_ENABLED="$(python3 -c "import json; print(json.load(open('${BACKUP_FILE}'))['easyeffects_output_guard']['enabled'])")"
-
-    if [[ "${KA_ENABLED}" == "enabled" ]]; then
-        systemctl --user enable ka1333-input-guard.service
-    fi
-    if [[ "${KA_ACTIVE}" == "active" ]]; then
-        systemctl --user start ka1333-input-guard.service
-    fi
-
-    if [[ "${EE_ENABLED}" == "enabled" ]]; then
-        systemctl --user enable easyeffects-output-guard.service
-    fi
-    if [[ "${EE_ACTIVE}" == "active" ]]; then
-        systemctl --user start easyeffects-output-guard.service
-    fi
-else
-    echo "⚠️ Backup não encontrado. Aplicando restauração padrão de segurança..."
-    systemctl --user enable --now ka1333-input-guard.service
-    systemctl --user enable --now easyeffects-output-guard.service
-fi
-
-# 4. Verify systemd guards and preset hashes
-echo "[4/4] Verificando integridade pós-rollback..."
-for unit in ka1333-input-guard.service easyeffects-output-guard.service; do
-    STATE="$(systemctl --user is-active "${unit}" 2>/dev/null || true)"
-    echo "• ${unit}: ${STATE}"
-    if [[ "${STATE}" != "active" ]]; then
-        echo "❌ Falha: ${unit} não está ativo após rollback!"
-        exit 1
-    fi
-done
-
-echo "✓ Guards de produção restaurados com sucesso e ativos."
+# Remove activation first, closing the race with another D-Bus client.
+failed=0
+rm -f "${HOME}/.local/share/dbus-1/services/org.easyprofile.Daemon.service" || failed=1
+systemctl --user stop easyprofiled.service || failed=1
+systemctl --user disable easyprofiled.service || failed=1
+[[ "$(systemd_state is-active easyprofiled.service)" == inactive ]] || failed=1
+gnome-extensions disable easyprofile@gnome-shell || failed=1
+while IFS=$'\t' read -r unit active enabled; do
+    restore_guard "$unit" "$active" "$enabled" || failed=1
+done <<< "$SAVED"
+verify_presets || failed=1
+[[ $failed == 0 ]] || { echo 'Rollback incomplete; snapshot retained for recovery.' >&2; exit 1; }
+echo 'Rollback verified: exact prior guard states, no D-Bus activation file, preset hashes intact.'
