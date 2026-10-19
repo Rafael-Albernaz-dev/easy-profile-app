@@ -1,4 +1,4 @@
-.PHONY: all quality-gate test test-race lint build clean inspect live-inspect
+.PHONY: all quality-gate test test-race test-regression bench lint build extension-pack clean inspect live-inspect
 
 BIN := bin/easyprofilectl
 
@@ -36,3 +36,15 @@ quality-gate:
 
 clean:
 	@rm -rf bin/
+
+extension-pack:
+	@mkdir -p dist
+	gnome-extensions pack --force --out-dir=dist --extra-source=dbus.js gnome-extension/easyprofile@gnome-shell
+
+bench:
+	EASYPROFILE_TEST_MODE=1 go test -run '^$$' -bench . -benchmem ./internal/inspect
+
+test-regression: test-race
+
+lint: fmt-check vet
+	EASYPROFILE_TEST_MODE=1 /home/toru/go/bin/staticcheck ./...

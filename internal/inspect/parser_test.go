@@ -154,3 +154,18 @@ func TestReadOnlyRunner_Security(t *testing.T) {
 		t.Errorf("expected ErrTestModeExec when %s=1, got %v", inspect.TestModeEnv, err)
 	}
 }
+
+func BenchmarkParseGraph(b *testing.B) {
+	data, err := os.ReadFile("../../test/fixtures/pw-dump-live-2026-10-18.json")
+	if err != nil {
+		b.Fatal(err)
+	}
+	b.ReportAllocs()
+	b.SetBytes(int64(len(data)))
+	b.ResetTimer()
+	for b.Loop() {
+		if _, err := inspect.ParseGraph(data); err != nil {
+			b.Fatal(err)
+		}
+	}
+}

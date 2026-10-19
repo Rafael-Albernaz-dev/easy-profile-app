@@ -1,20 +1,22 @@
 #!/usr/bin/env bash
 # Quality Gate for EasyProfileApp (Slice EP-001 Proportional)
 set -euo pipefail
+export EASYPROFILE_TEST_MODE=1
+export GSETTINGS_BACKEND=memory
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 cd "${REPO_ROOT}"
 
 echo "=========================================================="
-echo "🛡️  RUNNING EASYPROFILEAPP QUALITY GATES (EP-001)"
+echo "🛡️  RUNNING EASYPROFILEAPP QUALITY GATES (EP-004 + EP-005 MVP)"
 echo "=========================================================="
 
 # -----------------------------------------------------------------------------
 # GATE 1: Static Analysis, Formatting & Binary Compilation
 # -----------------------------------------------------------------------------
 echo ""
-echo "[Gate 1/6] Checking Go formatting, go vet, and compilation..."
+echo "[Gate 1/6] Checking Go formatting, go vet, staticcheck linter, and compilation..."
 UNFORMATTED="$(gofmt -s -l cmd internal)"
 if [ -n "${UNFORMATTED}" ]; then
     echo "❌ Error: Unformatted Go files detected:"
@@ -23,9 +25,15 @@ if [ -n "${UNFORMATTED}" ]; then
 fi
 
 go vet ./...
+STATICCHECK="${STATICCHECK:-/home/toru/go/bin/staticcheck}"
+if [[ ! -x "${STATICCHECK}" ]]; then
+    echo "staticcheck is required; set STATICCHECK to its installed executable."
+    exit 1
+fi
+"${STATICCHECK}" ./...
 mkdir -p "${REPO_ROOT}/bin"
-go build -o "${REPO_ROOT}/bin/easyprofilectl" ./cmd/easyprofilectl
-echo "✓ Go formatting, go vet, and compilation passed."
+go build -race -o "${REPO_ROOT}/bin/easyprofilectl" ./cmd/easyprofilectl
+echo "✓ Go formatting, go vet, staticcheck, and compilation passed."
 
 # -----------------------------------------------------------------------------
 # GATE 2: Forbidden Patterns & Git Hygiene Guardrail
@@ -93,7 +101,20 @@ done < "${BASELINE_FILE}"
 # Validate GNOME Extension schema compilation & syntax
 EXT_DIR="${REPO_ROOT}/gnome-extension/easyprofile@gnome-shell"
 glib-compile-schemas --strict --dry-run "${EXT_DIR}/schemas"
-node --check "${EXT_DIR}/extension.js"
+for js in "${EXT_DIR}"/*.js; do node --check "${js}"; done
+python3 - "${EXT_DIR}" <<'PYMETADATA'
+import json,sys,xml.etree.ElementTree as ET
+from pathlib import Path
+root=Path(sys.argv[1]);metadata=json.loads((root/'metadata.json').read_text())
+schema=ET.parse(next((root/'schemas').glob('*.xml'))).getroot().find('schema').attrib['id']
+assert metadata.get('settings-schema')==schema, 'metadata must bind Extension.getSettings() to schema'
+assert '46' in metadata['shell-version']
+PYMETADATA
+make extension-pack
+CONTENTS="$(unzip -Z1 "${REPO_ROOT}/dist/easyprofile@gnome-shell.shell-extension.zip")"
+for entry in metadata.json extension.js dbus.js schemas/org.gnome.shell.extensions.easyprofile.gschema.xml; do
+    grep -Fxq "${entry}" <<< "${CONTENTS}"
+done
 echo "✓ Production guards active, preset hashes intact, and extension schema/syntax valid."
 
 # -----------------------------------------------------------------------------
@@ -101,14 +122,15 @@ echo "✓ Production guards active, preset hashes intact, and extension schema/s
 # -----------------------------------------------------------------------------
 echo ""
 echo "[Gate 4/6] Running hermetic unit tests with race detector (EASYPROFILE_TEST_MODE=1)..."
-EASYPROFILE_TEST_MODE=1 go test -race -v ./internal/...
+go test -race -v ./...
 echo "✓ Hermetic unit tests passed with race detector."
 
 # -----------------------------------------------------------------------------
 # GATE 5: CLI Subcommand Execution (Read-Only Inspection)
 # -----------------------------------------------------------------------------
 echo ""
-echo "[Gate 5/6] Testing CLI read-only inspection execution..."
+echo "[Gate 5/6] Private D-Bus integration (fakes), CLI and read-only inspection..."
+./scripts/dbus-integration.sh
 INSPECT_OUT="$("${REPO_ROOT}/bin/easyprofilectl" inspect --json --pw-dump-file "${REPO_ROOT}/test/fixtures/pw-dump-live-2026-10-18.json" --offline)"
 if ! grep -q '"card_found": true' <<< "${INSPECT_OUT}"; then
     echo "❌ Error: easyprofilectl inspect did not find integrated card in fixture."
@@ -121,18 +143,15 @@ echo "✓ CLI read-only inspection verified."
 # -----------------------------------------------------------------------------
 echo ""
 echo "[Gate 6/6] Verifying parse performance budget on live dump (< 10 ms)..."
-START_NS=$(date +%s%N)
-"${REPO_ROOT}/bin/easyprofilectl" inspect --pw-dump-file "${REPO_ROOT}/test/fixtures/pw-dump-live-2026-10-18.json" --offline > /dev/null
-END_NS=$(date +%s%N)
-ELAPSED_MS=$(( (END_NS - START_NS) / 1000000 ))
-
-if [ "${ELAPSED_MS}" -gt 25 ]; then
-    echo "❌ Error: Graph parse and analysis took ${ELAPSED_MS} ms (budget <= 25 ms)."
-    exit 1
-fi
-echo "✓ Inspection executed in ${ELAPSED_MS} ms (well within budget)."
+BENCHMARK="$(go test -run '^$' -bench '^BenchmarkParseGraph$' -benchmem ./internal/inspect)"
+printf '%s\n' "${BENCHMARK}"
+awk '/^BenchmarkParseGraph/ { for(i=1;i<=NF;i++) if($i=="ns/op") { found=1; if($(i-1)>=10000000) exit 1 } } END { if(!found) exit 1 }' <<< "${BENCHMARK}"
+for unit in ka1333-input-guard.service easyeffects-output-guard.service; do
+    [[ "$(systemctl --user is-active "${unit}")" == active ]]
+done
+echo "✓ Parse benchmarks executed and production guards remain active."
 
 echo ""
 echo "=========================================================="
-echo "🎉 ALL 6 QUALITY GATES PASSED CLEANLY FOR EP-001!"
+echo "🎉 ALL 6 QUALITY GATES PASSED CLEANLY FOR EP-004 + EP-005 MVP!"
 echo "=========================================================="

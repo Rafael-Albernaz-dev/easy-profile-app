@@ -1,7 +1,9 @@
 package inspect
 
 import (
+	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"math"
 	"strings"
@@ -125,6 +127,7 @@ type rawParams struct {
 }
 
 type rawVolumeParam struct {
+	Params         []any     `json:"params"`
 	ChannelVolumes []float64 `json:"channelVolumes"`
 	SoftVolumes    []float64 `json:"softVolumes"`
 	MonitorVolumes []float64 `json:"monitorVolumes"`
@@ -135,6 +138,7 @@ type rawVolumeParam struct {
 type rawRoute struct {
 	Index     int             `json:"index"`
 	Device    int             `json:"device"`
+	Devices   []int           `json:"devices"`
 	Name      string          `json:"name"`
 	Direction string          `json:"direction"`
 	Available string          `json:"available"`
@@ -147,11 +151,22 @@ type rawMetaEntry struct {
 	Value   json.RawMessage `json:"value"`
 }
 
-// ParseGraph decodes a complete `pw-dump --no-colors` JSON array.
+// ParseGraph decodes a complete `pw-dump --no-colors` JSON array or sequence of arrays.
 func ParseGraph(data []byte) (*Graph, error) {
 	var objects []rawObject
-	if err := json.Unmarshal(data, &objects); err != nil {
-		return nil, fmt.Errorf("pw-dump JSON: %w", err)
+	dec := json.NewDecoder(bytes.NewReader(data))
+	for dec.More() {
+		var chunk []rawObject
+		if err := dec.Decode(&chunk); err != nil {
+			if len(objects) == 0 {
+				return nil, fmt.Errorf("pw-dump JSON: %w", err)
+			}
+			break
+		}
+		objects = append(objects, chunk...)
+	}
+	if len(objects) == 0 {
+		return nil, errors.New("pw-dump returned empty object list")
 	}
 	g := &Graph{
 		Nodes:          map[int]*NodeInfo{},
@@ -191,6 +206,15 @@ func parseNode(id int, info *rawInfo) *NodeInfo {
 	if v, ok := p["monitor.channel-volumes"].(bool); ok {
 		n.MonitorChannelVolumes = &v
 	}
+	for _, param := range info.Params.Props {
+		for i := 0; i+1 < len(param.Params); i += 2 {
+			if key, ok := param.Params[i].(string); ok && key == "monitor.channel-volumes" {
+				if value, ok := param.Params[i+1].(bool); ok {
+					n.MonitorChannelVolumes = &value
+				}
+			}
+		}
+	}
 	return n
 }
 
@@ -228,7 +252,11 @@ func parseDevice(id int, info *rawInfo) *DeviceInfo {
 		ProductID: propString(p, "device.product.id"),
 	}
 	convert := func(r rawRoute) RouteInfo {
-		ri := RouteInfo{Index: r.Index, Device: r.Device, Name: r.Name, Direction: r.Direction, Available: r.Available}
+		dev := r.Device
+		if dev == 0 && len(r.Devices) > 0 {
+			dev = r.Devices[0]
+		}
+		ri := RouteInfo{Index: r.Index, Device: dev, Name: r.Name, Direction: r.Direction, Available: r.Available}
 		if r.Props != nil {
 			ri.Volume = mergeVolumeParams([]rawVolumeParam{*r.Props})
 		}

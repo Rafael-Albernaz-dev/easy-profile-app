@@ -1,0 +1,368 @@
+{
+  "generated_at": "2026-10-18T20:25:09.222239473-03:00",
+  "source": "live pw-dump",
+  "identity": {
+    "card_name": "alsa_card.pci-0000_00_1f.3",
+    "physical_sink": "alsa_output.pci-0000_00_1f.3.analog-stereo",
+    "virtual_sink": "easyeffects_sink",
+    "virtual_source": "easyeffects_source",
+    "route_akg": "analog-output-headphones",
+    "route_sp166": "analog-output-lineout",
+    "mic_vendor_id": "0x0a67",
+    "mic_product_id": "0xd117",
+    "mic_serial": "MU900_KA-1333_20190805V001",
+    "mic_profile": "iec958-stereo"
+  },
+  "graph": {
+    "card_found": true,
+    "card_id": 46,
+    "active_output_route": "analog-output-headphones",
+    "active_destination": "akg",
+    "active_route_volume": {
+      "channel_volumes": [
+        0.912676,
+        0.912676
+      ],
+      "soft_volumes": [
+        1,
+        1
+      ],
+      "mute": false
+    },
+    "route_options": [
+      {
+        "destination": "akg",
+        "name": "analog-output-headphones",
+        "index": 4,
+        "available": "yes",
+        "found": true
+      },
+      {
+        "destination": "sp166",
+        "name": "analog-output-lineout",
+        "index": 3,
+        "available": "yes",
+        "found": true
+      }
+    ],
+    "physical_sink": {
+      "id": 49,
+      "object_serial": 49,
+      "name": "alsa_output.pci-0000_00_1f.3.analog-stereo",
+      "media_class": "Audio/Sink",
+      "device_id": 46,
+      "device_profile": "analog-stereo",
+      "monitor_channel_volumes": false,
+      "volume": {
+        "channel_volumes": [
+          0.912676,
+          0.912676
+        ],
+        "soft_volumes": [
+          1,
+          1
+        ],
+        "monitor_volumes": [
+          1,
+          1
+        ],
+        "mute": false,
+        "monitor_mute": false
+      }
+    },
+    "virtual_sink": {
+      "id": 197,
+      "object_serial": 3565,
+      "name": "easyeffects_sink",
+      "media_class": "Audio/Sink",
+      "monitor_channel_volumes": false,
+      "volume": {
+        "channel_volumes": [
+          1.158746,
+          1.158746
+        ],
+        "soft_volumes": [
+          1,
+          1
+        ],
+        "monitor_volumes": [
+          1,
+          1
+        ],
+        "mute": false,
+        "monitor_mute": false
+      }
+    },
+    "virtual_source": {
+      "id": 194,
+      "object_serial": 3566,
+      "name": "easyeffects_source",
+      "media_class": "Audio/Source/Virtual",
+      "monitor_channel_volumes": false,
+      "volume": {
+        "channel_volumes": [
+          1,
+          1
+        ],
+        "soft_volumes": [
+          1,
+          1
+        ],
+        "monitor_volumes": [
+          1,
+          1
+        ],
+        "mute": false,
+        "monitor_mute": false
+      }
+    },
+    "mic_candidates": [
+      {
+        "id": 120,
+        "object_serial": 1390,
+        "name": "alsa_input.usb-MU900_KA-1333_20190805V001-00.iec958-stereo.3",
+        "media_class": "Audio/Source",
+        "device_id": 33,
+        "device_profile": "iec958-stereo",
+        "monitor_channel_volumes": false,
+        "volume": {
+          "channel_volumes": [
+            1,
+            1
+          ],
+          "soft_volumes": [
+            1,
+            1
+          ],
+          "monitor_volumes": [
+            1,
+            1
+          ],
+          "mute": false,
+          "monitor_mute": false
+        }
+      }
+    ],
+    "mic_resolved": {
+      "id": 120,
+      "object_serial": 1390,
+      "name": "alsa_input.usb-MU900_KA-1333_20190805V001-00.iec958-stereo.3",
+      "media_class": "Audio/Source",
+      "device_id": 33,
+      "device_profile": "iec958-stereo",
+      "monitor_channel_volumes": false,
+      "volume": {
+        "channel_volumes": [
+          1,
+          1
+        ],
+        "soft_volumes": [
+          1,
+          1
+        ],
+        "monitor_volumes": [
+          1,
+          1
+        ],
+        "mute": false,
+        "monitor_mute": false
+      }
+    },
+    "default_sink": "easyeffects_sink",
+    "default_source": "alsa_input.usb-MU900_KA-1333_20190805V001-00.iec958-stereo.3",
+    "configured_sink": "easyeffects_sink",
+    "configured_source": "alsa_input.usb-MU900_KA-1333_20190805V001-00.iec958-stereo",
+    "raw_mic_captures": [],
+    "processed_captures": [],
+    "restore_targets_physical_sink": {
+      "restore.stream.Output/Audio.media.role:Notification": "alsa_output.pci-0000_00_1f.3.analog-stereo"
+    },
+    "playback_bypassing_easyeffects": []
+  },
+  "alsa": {
+    "card": "PCH",
+    "auto_mute": {
+      "name": "Auto-Mute Mode",
+      "found": true,
+      "enum_item": "Disabled"
+    },
+    "headphone": {
+      "name": "Headphone",
+      "found": true,
+      "percent": [
+        100,
+        100
+      ],
+      "switch_on": [
+        true,
+        true
+      ]
+    },
+    "front": {
+      "name": "Front",
+      "found": true,
+      "percent": [
+        0,
+        0
+      ],
+      "switch_on": [
+        false,
+        false
+      ]
+    }
+  },
+  "easyeffects": {
+    "last_used_output_preset": "AKG K52 - Uso diario aprovado",
+    "last_used_input_preset": "Preset KA-1333",
+    "bypass": false,
+    "process_all_outputs": true,
+    "process_all_inputs": true,
+    "use_cubic_volumes": false,
+    "output_device": "alsa_output.pci-0000_00_1f.3.analog-stereo",
+    "use_default_output_device": false,
+    "input_device": "alsa_input.usb-MU900_KA-1333_20190805V001-00.iec958-stereo.3",
+    "use_default_input_device": false
+  },
+  "presets": {
+    "dir": "/home/toru/.config/easyeffects",
+    "presets": [
+      {
+        "name": "Preset KA-1333",
+        "direction": "input",
+        "sha256": "2b31d5fc18d5710026de5e57469a7021f5f67e1aa6f9b4f4e586033f8195e170"
+      },
+      {
+        "name": "AKG K52 - Uso diario aprovado",
+        "direction": "output",
+        "sha256": "c7af0ffd83f1c7598f477c1789825a321e2a1570309fd5f426b32d39cd57d669",
+        "compatible_destinations": [
+          "akg"
+        ]
+      },
+      {
+        "name": "SP166 - Uso diario aprovado",
+        "direction": "output",
+        "sha256": "7802bfbf95d5fe70d1964e6cfca63adc90a86ed26d78837dd45b2f2a3a142f52",
+        "compatible_destinations": [
+          "sp166"
+        ]
+      }
+    ],
+    "name_collisions": null
+  },
+  "guards": {
+    "easyeffects-output-guard.service": "active",
+    "ka1333-input-guard.service": "active"
+  },
+  "findings": [
+    {
+      "code": "ROUTE_ACTIVE",
+      "severity": "OK",
+      "title": "Destino ativo: AKG K52 (P2 frontal)",
+      "detail": "A placa integrada tem UMA saída física com duas 'portas' (rotas). Hoje a rota selecionada é analog-output-headphones. Trocar de destino = trocar a rota, não trocar de dispositivo."
+    },
+    {
+      "code": "ROUTE_INDEXES",
+      "severity": "OK",
+      "title": "Rotas oferecidas pela placa (EnumRoute)",
+      "detail": "analog-output-headphones → índice 4 (disponível: yes); analog-output-lineout → índice 3 (disponível: yes). Esses índices são lidos a cada operação; nunca viram constante no código."
+    },
+    {
+      "code": "MIC_RESOLVE",
+      "severity": "OK",
+      "title": "KA-1333 identificado pelo serial USB",
+      "detail": "Fonte atual: alsa_input.usb-MU900_KA-1333_20190805V001-00.iec958-stereo.3. O sufixo numérico do nome pode mudar entre reconexões; por isso a busca é feita pelo serial USB, igual ao guard instalado."
+    },
+    {
+      "code": "VSINK_MONITOR_VOLUMES",
+      "severity": "ATENCAO",
+      "title": "monitor.channel-volumes = false na saída virtual (easyeffects_sink)",
+      "detail": "O som que sai deste nó para o resto da cadeia passa pelas portas de 'monitor'. Com essa opção desligada, mudar o volume/mute normal do nó pode mudar o número exibido SEM atenuar o som nesse caminho. Contrato a provar com escuta acompanhada na EP-002 antes de usar este controle."
+    },
+    {
+      "code": "VSOURCE_MONITOR_VOLUMES",
+      "severity": "ATENCAO",
+      "title": "monitor.channel-volumes = false na fonte virtual (easyeffects_source)",
+      "detail": "O som que sai deste nó para o resto da cadeia passa pelas portas de 'monitor'. Com essa opção desligada, mudar o volume/mute normal do nó pode mudar o número exibido SEM atenuar o som nesse caminho. Contrato a provar com escuta acompanhada na EP-002 antes de usar este controle."
+    },
+    {
+      "code": "VSINK_SOFT_DIVERGENCE",
+      "severity": "INFO",
+      "title": "Volume pedido ≠ ganho aplicado no easyeffects_sink",
+      "detail": "O volume pedido aparece como 105% (wpctl), mas o ganho de software aplicado pelo próprio nó é 1.00 (linear). Indício coerente com o item acima: a atenuação pode estar acontecendo em outro ponto (ex.: no aplicativo/stream) ou não acontecer. Só a escuta da EP-002 decide."
+    },
+    {
+      "code": "PHYSICAL_VOLUME",
+      "severity": "INFO",
+      "title": "Volume físico da placa: 97% (linear 0.913)",
+      "detail": "PipeWire guarda ganho LINEAR; wpctl/GNOME mostram a raiz cúbica. Ex.: linear 0,848 = 95% na tela. Comparações sempre na mesma escala."
+    },
+    {
+      "code": "DEFAULT_SINK",
+      "severity": "OK",
+      "title": "Saída padrão dos apps = easyeffects_sink",
+      "detail": "Apps que tocam no padrão passam pelo tratamento antes de chegar na placa."
+    },
+    {
+      "code": "DEFAULT_SOURCE_RAW",
+      "severity": "INFO",
+      "title": "Microfone padrão do sistema = KA-1333 físico (cru)",
+      "detail": "A fonte padrão é o mic sem tratamento. Com process-all-inputs ligado, o EasyEffects tende a redirecionar as capturas, mas isso não é garantia por app. O alerta de 'mic cru' (links reais) é quem prova."
+    },
+    {
+      "code": "RAW_CAPTURES",
+      "severity": "OK",
+      "title": "Nenhum app lendo o microfone cru agora",
+      "detail": "Só reflete este instante: sem chamada aberta, não há captura para avaliar."
+    },
+    {
+      "code": "RESTORE_TO_PHYSICAL",
+      "severity": "INFO",
+      "title": "WirePlumber lembra stream(s) apontando para a placa física",
+      "detail": "Classes: Output/Audio.media.role:Notification. Ex.: sons de notificação podem ir direto para a placa, sem passar pelo tratamento e sem obedecer o volume virtual. Apenas observado; nada alterado."
+    },
+    {
+      "code": "ALSA_AUTOMUTE",
+      "severity": "OK",
+      "title": "Auto-Mute Mode = Disabled",
+      "detail": "Pré-condição da troca: permite usar a traseira mesmo com o fone plugado na frente."
+    },
+    {
+      "code": "ALSA_PINS",
+      "severity": "OK",
+      "title": "Pinos coerentes: Headphone ligado, Front mudo",
+      "detail": "Só o destino ativo pode soar; o outro P2 está silenciado no hardware."
+    },
+    {
+      "code": "EE_BYPASS",
+      "severity": "OK",
+      "title": "Bypass global desligado",
+      "detail": "Os filtros estão ativos."
+    },
+    {
+      "code": "EE_OUTPUT_DEVICE",
+      "severity": "OK",
+      "title": "Destino interno do EasyEffects = placa integrada",
+      "detail": "O som tratado sai para a placa física (o que o guard de saída mantém)."
+    },
+    {
+      "code": "EE_INPUT_DEVICE",
+      "severity": "OK",
+      "title": "Entrada interna do EasyEffects = KA-1333",
+      "detail": "Os filtros do microfone recebem o KA-1333 (o que o guard de entrada mantém)."
+    },
+    {
+      "code": "EE_PRESET_MATCH",
+      "severity": "OK",
+      "title": "Preset de saída coerente com o destino: AKG K52 - Uso diario aprovado",
+      "detail": "Leitura do último preset carregado. Nome coerente não prova cadeia pronta; a EP-002 confere plugins/links."
+    },
+    {
+      "code": "GUARDS",
+      "severity": "OK",
+      "title": "Os 2 guards de produção estão ativos",
+      "detail": "Nada do setup atual foi substituído."
+    }
+  ],
+  "parse_time_ns": 4610119
+}

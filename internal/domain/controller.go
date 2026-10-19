@@ -30,8 +30,14 @@ type AudioController struct {
 
 // NewAudioController constructs the controller, optionally restoring previous session data.
 func NewAudioController(store *SessionStore) *AudioController {
-	akg := DefaultAKGDestination()
-	sp166 := DefaultSP166Destination()
+	return newAudioController(store, DefaultAKGDestination(), DefaultSP166Destination())
+}
+
+// NewAudioControllerWithDestinations uses validated setup configuration and session-only memory.
+func NewAudioControllerWithDestinations(akg, sp166 *Destination) *AudioController {
+	return newAudioController(nil, akg, sp166)
+}
+func newAudioController(store *SessionStore, akg, sp166 *Destination) *AudioController {
 	defaultVol := NewPercentageLevel(95)
 
 	c := &AudioController{
@@ -72,7 +78,7 @@ func (c *AudioController) restoreFromSessionData(data *SessionData) {
 	}
 	c.outputMuted = data.OutputMuted
 
-	if data.MicLevelPct > 0 && data.MicLevelPct <= 100 {
+	if data.MicLevelPct >= 0 && data.MicLevelPct <= 100 {
 		c.mic.PostDSPLevel = NewPercentageLevel(data.MicLevelPct)
 	}
 	c.mic.VirtualMuted = data.MicVirtualMuted
@@ -80,6 +86,10 @@ func (c *AudioController) restoreFromSessionData(data *SessionData) {
 
 	for id, portState := range data.Ports {
 		if _, ok := c.destinations[id]; ok {
+			portState.VirtualVolume = NewPercentageLevel(portState.VirtualVolume).Percent()
+			if !c.destinations[id].IsPresetCompatible(portState.ActivePreset) {
+				portState.ActivePreset = c.destinations[id].BasePreset
+			}
 			c.portMemory[id] = portState
 		}
 	}
@@ -109,7 +119,7 @@ func (c *AudioController) persist() {
 func (c *AudioController) ActiveDestination() *Destination {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
-	return c.destinations[c.activeDestination]
+	return cloneDestination(c.destinations[c.activeDestination])
 }
 
 // Destination retrieves a specific destination by ID.
@@ -120,7 +130,7 @@ func (c *AudioController) Destination(id DestinationID) (*Destination, error) {
 	if !ok {
 		return nil, ErrUnknownDestination
 	}
-	return dest, nil
+	return cloneDestination(dest), nil
 }
 
 // OutputVirtualVolume returns the active destination's current virtual volume level.
@@ -187,7 +197,7 @@ func (c *AudioController) SwitchDestination(target DestinationID) (*Destination,
 	c.activeDestination = target
 	state := c.portMemory[target]
 	c.persist()
-	return dest, state, nil
+	return cloneDestination(dest), state, nil
 }
 
 // ToggleDestination switches between AKG headphones and SP166 speakers.
@@ -202,7 +212,7 @@ func (c *AudioController) ToggleDestination() (*Destination, PortSessionState) {
 	c.activeDestination = target
 	state := c.portMemory[target]
 	c.persist()
-	return c.destinations[target], state
+	return cloneDestination(c.destinations[target]), state
 }
 
 // StepOutputVolume adjusts the current port's virtual volume by steps * 2%.
@@ -346,4 +356,14 @@ func (c *AudioController) ResetToDailyBase() (preset string, outVol PercentageLe
 	}
 	c.persist()
 	return mem.ActivePreset, c.defaultVirtualVolume, c.mic.PostDSPLevel, c.mic.IsPrivacyMuted()
+}
+
+func cloneDestination(d *Destination) *Destination {
+	copy := *d
+	copy.PresetPrefixes = append([]string(nil), d.PresetPrefixes...)
+	copy.allowedExplicit = make(map[string]struct{}, len(d.allowedExplicit))
+	for p := range d.allowedExplicit {
+		copy.allowedExplicit[p] = struct{}{}
+	}
+	return &copy
 }

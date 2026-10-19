@@ -38,17 +38,17 @@ type Destination struct {
 
 // DestinationConfig defines construction parameters for a Destination.
 type DestinationConfig struct {
-	ID                  DestinationID
-	Label               string
-	CardName            string
-	PhysicalSinkName    string
-	RouteName           string
-	AlsaActiveControl   string
-	AlsaInactiveControl string
-	PhysicalCeilingPct  int
-	BasePreset          string
-	PresetPrefixes      []string
-	ExplicitPresets     []string
+	ID                  DestinationID `json:"id"`
+	Label               string        `json:"label"`
+	CardName            string        `json:"card_name"`
+	PhysicalSinkName    string        `json:"physical_sink_name"`
+	RouteName           string        `json:"route_name"`
+	AlsaActiveControl   string        `json:"alsa_active_control"`
+	AlsaInactiveControl string        `json:"alsa_inactive_control"`
+	PhysicalCeilingPct  int           `json:"physical_ceiling_pct"`
+	BasePreset          string        `json:"base_preset"`
+	PresetPrefixes      []string      `json:"preset_prefixes"`
+	ExplicitPresets     []string      `json:"explicit_presets"`
 }
 
 // NewDestination constructs and validates an encapsulated Destination.

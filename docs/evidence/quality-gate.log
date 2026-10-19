@@ -1,0 +1,143 @@
+==========================================================
+🛡️  RUNNING EASYPROFILEAPP QUALITY GATES (EP-004 + EP-005 MVP)
+==========================================================
+
+[Gate 1/6] Checking Go formatting, go vet, staticcheck linter, and compilation...
+✓ Go formatting, go vet, staticcheck, and compilation passed.
+
+[Gate 2/6] Auditing forbidden mutation patterns and git hygiene...
+✓ Zero forbidden shell patterns and git hygiene verified.
+
+[Gate 3/6] Verifying production guards are active and preset hashes unchanged...
+gnome-extensions pack --force --out-dir=dist --extra-source=dbus.js gnome-extension/easyprofile@gnome-shell
+✓ Production guards active, preset hashes intact, and extension schema/syntax valid.
+
+[Gate 4/6] Running hermetic unit tests with race detector (EASYPROFILE_TEST_MODE=1)...
+?   	github.com/toru/easy-profile-app/cmd/easyprofilectl	[no test files]
+?   	github.com/toru/easy-profile-app/internal/adapters	[no test files]
+=== RUN   TestRealAlsa_TestModeProtection
+--- PASS: TestRealAlsa_TestModeProtection (0.00s)
+=== RUN   TestFakeAlsa_InMemoryBehavior
+--- PASS: TestFakeAlsa_InMemoryBehavior (0.00s)
+PASS
+ok  	github.com/toru/easy-profile-app/internal/adapters/alsa	(cached)
+=== RUN   TestRealEasyEffects_TestModeProtection
+--- PASS: TestRealEasyEffects_TestModeProtection (0.00s)
+=== RUN   TestFakeEasyEffects_InMemoryBehavior
+--- PASS: TestFakeEasyEffects_InMemoryBehavior (0.00s)
+=== RUN   TestPresetValidationRejectsCollisionAndPreservesFile
+--- PASS: TestPresetValidationRejectsCollisionAndPreservesFile (0.00s)
+=== RUN   TestParseOrderedGSettingsPlugins
+--- PASS: TestParseOrderedGSettingsPlugins (0.00s)
+PASS
+ok  	github.com/toru/easy-profile-app/internal/adapters/easyeffects	(cached)
+=== RUN   TestMigrationRequiresUniqueActiveApplicationStream
+--- PASS: TestMigrationRequiresUniqueActiveApplicationStream (0.00s)
+=== RUN   TestRealPipeWire_TestModeProtection
+--- PASS: TestRealPipeWire_TestModeProtection (0.00s)
+=== RUN   TestFakePipeWire_InMemoryBehavior
+--- PASS: TestFakePipeWire_InMemoryBehavior (0.00s)
+=== RUN   TestWPCTLLinearToCubicBoundary
+--- PASS: TestWPCTLLinearToCubicBoundary (0.00s)
+=== RUN   TestRealReadsAndMonitorCannotEscapeTestMode
+--- PASS: TestRealReadsAndMonitorCannotEscapeTestMode (0.00s)
+PASS
+ok  	github.com/toru/easy-profile-app/internal/adapters/pipewire	(cached)
+=== RUN   TestConfigCalibratedExampleAndUnsafeOverrides
+--- PASS: TestConfigCalibratedExampleAndUnsafeOverrides (0.00s)
+=== RUN   TestDaemon_InitHardware
+--- PASS: TestDaemon_InitHardware (0.00s)
+=== RUN   TestDaemon_GetStatus
+--- PASS: TestDaemon_GetStatus (0.00s)
+=== RUN   TestDaemon_VolumeAndMuteControls
+--- PASS: TestDaemon_VolumeAndMuteControls (0.00s)
+=== RUN   TestDaemon_PanicMuteAndReset
+--- PASS: TestDaemon_PanicMuteAndReset (0.00s)
+=== RUN   TestDaemon_SwitchDestination
+--- PASS: TestDaemon_SwitchDestination (0.00s)
+=== RUN   TestDBusIntegrationAllMethodsAndSignals
+    dbus_integration_test.go:15: requires private dbus-run-session integration gate
+--- SKIP: TestDBusIntegrationAllMethodsAndSignals (0.00s)
+=== RUN   TestPanicRestoresIndependentObservedMicrophoneMutes
+--- PASS: TestPanicRestoresIndependentObservedMicrophoneMutes (0.00s)
+=== RUN   TestPanicManualOverrideAndVolumeScale
+--- PASS: TestPanicManualOverrideAndVolumeScale (0.00s)
+=== RUN   TestFailedVolumeDoesNotCommitAndFailedRouteStaysMuted
+--- PASS: TestFailedVolumeDoesNotCommitAndFailedRouteStaysMuted (0.00s)
+=== RUN   TestPresetFilteringTracksDestination
+--- PASS: TestPresetFilteringTracksDestination (0.00s)
+=== RUN   TestPanicCancelsRouteBeforeQueuedVolume
+--- PASS: TestPanicCancelsRouteBeforeQueuedVolume (0.00s)
+=== RUN   TestObserveOnlyRefusesEveryControl
+--- PASS: TestObserveOnlyRefusesEveryControl (0.00s)
+=== RUN   TestPanicAcceptedWhenNormalQueueFull
+--- PASS: TestPanicAcceptedWhenNormalQueueFull (0.00s)
+=== RUN   TestPanicAttemptsAllTargetsWithUnreadableSnapshot
+--- PASS: TestPanicAttemptsAllTargetsWithUnreadableSnapshot (0.00s)
+=== RUN   TestPartialMuteRemainsDegradedAfterObservation
+--- PASS: TestPartialMuteRemainsDegradedAfterObservation (0.00s)
+=== RUN   TestVolumeRequestsCoalesceWithoutLosingSteps
+--- PASS: TestVolumeRequestsCoalesceWithoutLosingSteps (0.00s)
+=== RUN   TestInitializationProtectsHardwareBeforeEnablingVirtualGain
+--- PASS: TestInitializationProtectsHardwareBeforeEnablingVirtualGain (0.00s)
+PASS
+ok  	github.com/toru/easy-profile-app/internal/daemon	1.031s
+=== RUN   TestSessionRestoreKeepsZeroMicAndRejectsCrossRoutePreset
+--- PASS: TestSessionRestoreKeepsZeroMicAndRejectsCrossRoutePreset (0.00s)
+=== RUN   TestPercentageLevel_ArithmeticAndClamping
+--- PASS: TestPercentageLevel_ArithmeticAndClamping (0.00s)
+=== RUN   TestDestination_PresetCompatibility
+--- PASS: TestDestination_PresetCompatibility (0.00s)
+=== RUN   TestAudioController_PanicMute_3BooleansPreservation
+--- PASS: TestAudioController_PanicMute_3BooleansPreservation (0.01s)
+=== RUN   TestAudioController_PanicMute_ManualOverride
+--- PASS: TestAudioController_PanicMute_ManualOverride (0.00s)
+=== RUN   TestAudioController_ResetToDailyBase_PreservesMicMute
+--- PASS: TestAudioController_ResetToDailyBase_PreservesMicMute (0.00s)
+=== RUN   TestSessionStore_PersistenceAndRecall
+--- PASS: TestSessionStore_PersistenceAndRecall (0.00s)
+PASS
+ok  	github.com/toru/easy-profile-app/internal/domain	(cached)
+=== RUN   TestMonitorChannelVolumesFromSPAParams
+--- PASS: TestMonitorChannelVolumesFromSPAParams (0.00s)
+=== RUN   TestParseGraph_LiveFixture
+--- PASS: TestParseGraph_LiveFixture (0.05s)
+=== RUN   TestParseGraph_EdgeCases
+--- PASS: TestParseGraph_EdgeCases (0.00s)
+=== RUN   TestReadOnlyRunner_Security
+--- PASS: TestReadOnlyRunner_Security (0.00s)
+PASS
+ok  	github.com/toru/easy-profile-app/internal/inspect	(cached)
+✓ Hermetic unit tests passed with race detector.
+
+[Gate 5/6] Private D-Bus integration (fakes), CLI and read-only inspection...
+=== RUN   TestDBusIntegrationAllMethodsAndSignals
+    dbus_integration_test.go:107: in-memory GetStatus IPC average: 685.389µs
+--- PASS: TestDBusIntegrationAllMethodsAndSignals (0.09s)
+PASS
+ok  	github.com/toru/easy-profile-app/internal/daemon	1.110s
+Shared GJS proxy: signed-int method, cancellable and StateChanged passed.
+Output is now MUTED
+Microphone is now MUTED (Dual-Mute: Virtual + Physical)
+🚨 PANIC MUTE ACTIVE: All outputs and microphone muted.
+✓ Exited Panic Mute: Restored prior channel mute states.
+Switched route to: SP166
+Switched route to: AKG
+Applied preset: AKG - Rock
+✓ Audio settings reset to daily baseline (output 95%, mic 100%, mic mute preserved).
+Private D-Bus + CLI/daemon integration passed; zero host audio commands.
+✓ CLI read-only inspection verified.
+
+[Gate 6/6] Verifying parse performance budget on live dump (< 10 ms)...
+goos: linux
+goarch: amd64
+pkg: github.com/toru/easy-profile-app/internal/inspect
+cpu: Intel(R) Core(TM) i5-7400 CPU @ 3.00GHz
+BenchmarkParseGraph-4   	     390	   2823898 ns/op	 112.08 MB/s	  367174 B/op	    7601 allocs/op
+PASS
+ok  	github.com/toru/easy-profile-app/internal/inspect	1.106s
+✓ Parse benchmarks executed and production guards remain active.
+
+==========================================================
+🎉 ALL 6 QUALITY GATES PASSED CLEANLY FOR EP-004 + EP-005 MVP!
+==========================================================

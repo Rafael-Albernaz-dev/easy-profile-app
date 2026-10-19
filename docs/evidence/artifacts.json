@@ -1,0 +1,9 @@
+{
+  "scope": "local prepared artifacts; desktop QA pending; no install, activation or commit",
+  "sha256": {
+    "config.example.json": "d7d89f7a7cd35a28030b63707aa35c3783076bceb75757dc4e1075abd3a27934",
+    "dist/easyprofile@gnome-shell.shell-extension.zip": "26c004b02a095b47010609b8283913144d1988ae4bc3588ade6fb78fc5d4a21a",
+    "gnome-extension/easyprofile@gnome-shell/extension.js": "2b28717e2ffa8d19ac42284682452c708686d2289ff062160d6f0a1b271f9bc3",
+    "gnome-extension/easyprofile@gnome-shell/dbus.js": "2698bd14e7370323f1cfd8f32858e50425485004853b8a0e7ba248156e568dc3"
+  }
+}

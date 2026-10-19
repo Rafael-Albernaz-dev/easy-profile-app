@@ -1,0 +1,9 @@
+{
+  "scope": "private D-Bus, fake adapters, non-race binary; no real audio or GNOME QA",
+  "window_seconds": 60.00034563200097,
+  "rss_start_kib": 8168,
+  "rss_end_kib": 8040,
+  "cpu_seconds": 0.0,
+  "cpu_percent_one_core": 0.0,
+  "pid": 2186151
+}

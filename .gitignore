@@ -11,8 +11,8 @@ prompts/
 # Compiled Binaries & Build Artifacts
 /bin/
 /dist/
-easyprofiled
-easyprofilectl
+/easyprofiled
+/easyprofilectl
 *.exe
 *.out
 *.test

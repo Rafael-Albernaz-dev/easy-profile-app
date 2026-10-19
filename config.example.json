@@ -1,0 +1,33 @@
+{
+  "alsa_card": "PCH",
+  "virtual_sink": "easyeffects_sink",
+  "virtual_source": "easyeffects_source",
+  "physical_microphone_prefix": "alsa_input.usb-MU900_KA-1333",
+  "stabilization_ms": 1200,
+  "destinations": [
+    {
+      "id": "akg",
+      "label": "Fone AKG K52",
+      "card_name": "alsa_card.pci-0000_00_1f.3",
+      "physical_sink_name": "alsa_output.pci-0000_00_1f.3.analog-stereo",
+      "route_name": "analog-output-headphones",
+      "alsa_active_control": "Headphone",
+      "alsa_inactive_control": "Front",
+      "physical_ceiling_pct": 97,
+      "base_preset": "AKG K52 - Uso diario aprovado",
+      "preset_prefixes": ["AKG", "[AKG]"]
+    },
+    {
+      "id": "sp166",
+      "label": "Caixas SP166",
+      "card_name": "alsa_card.pci-0000_00_1f.3",
+      "physical_sink_name": "alsa_output.pci-0000_00_1f.3.analog-stereo",
+      "route_name": "analog-output-lineout",
+      "alsa_active_control": "Front",
+      "alsa_inactive_control": "Headphone",
+      "physical_ceiling_pct": 100,
+      "base_preset": "SP166 - Uso diario aprovado",
+      "preset_prefixes": ["SP166", "Caixas", "[SP166]"]
+    }
+  ]
+}
