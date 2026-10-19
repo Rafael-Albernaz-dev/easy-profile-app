@@ -26,6 +26,7 @@ type AudioController struct {
 	defaultVirtualVolume PercentageLevel
 	mic                  *Microphone
 	panicState           PanicSnapshot
+	micMonitoring        bool
 	store                *SessionStore
 	sessionID            string
 	persistenceErr       error
@@ -243,6 +244,28 @@ func (c *AudioController) PanicState() PanicSnapshot {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 	return c.panicState
+}
+
+// MicMonitoring returns whether microphone monitoring to output is active.
+func (c *AudioController) MicMonitoring() bool {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	return c.micMonitoring
+}
+
+// SetMicMonitoring sets the microphone monitoring state.
+func (c *AudioController) SetMicMonitoring(v bool) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.micMonitoring = v
+}
+
+// ToggleMicMonitoring toggles microphone monitoring.
+func (c *AudioController) ToggleMicMonitoring() bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.micMonitoring = !c.micMonitoring
+	return c.micMonitoring
 }
 
 // SwitchDestination switches output to target destination and retrieves that port's session volume and preset.

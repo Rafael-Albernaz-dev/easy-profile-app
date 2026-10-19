@@ -10,7 +10,7 @@ ExecStart=%h/.local/bin/easyprofilectl daemon --control --config %h/.config/easy
 Restart=on-failure
 RestartSec=3
 MemoryMax=64M
-TasksMax=32
+TasksMax=128
 
 [Install]
 WantedBy=graphical-session.target

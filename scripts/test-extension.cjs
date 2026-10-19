@@ -32,7 +32,7 @@ function extension() {
         _levelInFlight: new Set(), _retrySources: new Set(), _barriers: [], _barrierBusy: false,
         _status: status(), _targetChannel: 'out', _keybindingKeys: [], _keymap: {get_num_lock_state: () => true},
         _cancellable: {cancel() {}}, _settings: {}});
-    for (const key of ['_label', '_icon', '_muteBadge', '_micMuteBadge', '_btnAKG', '_btnSP166',
+    for (const key of ['_label', '_icon', '_muteBadge', '_micMuteBadge', '_listenBadge', '_btnAKG', '_btnSP166',
         '_volSlider', '_micSlider', '_btnMuteOut', '_btnMuteMic', '_presetsSubMenu', '_warningBanner', '_rawStreamMenu']) e[key] = actor();
     const calls = [];
     const proxy = {g_name_owner: ':fake.1'};
@@ -108,11 +108,12 @@ function extension() {
     }
     bindings.get('shortcut-reset-app').handler(); assert.equal(actions[0][0], 'ResetDefaults');
     bindings.get('shortcut-mute-panic').handler(); assert.equal(actions[1][0], 'TogglePanic');
+    bindings.get('shortcut-noop-7').handler(); assert.equal(actions[2][0], 'ToggleMicMonitoring');
     bindings.get('shortcut-select-mic').handler(); assert.equal(e._targetChannel, 'mic');
-    for (const name of ['shortcut-noop-7', 'shortcut-noop-8', 'shortcut-noop-9']) bindings.get(name).handler();
-    assert.equal(actions.length, 2);
+    for (const name of ['shortcut-noop-8', 'shortcut-noop-9']) bindings.get(name).handler();
+    assert.equal(actions.length, 3);
     e._keymap.get_num_lock_state = () => false;
-    bindings.get('shortcut-mute-panic').handler(); assert.equal(actions.length, 2);
+    bindings.get('shortcut-mute-panic').handler(); assert.equal(actions.length, 3);
     e._unregisterKeybindings(); assert.equal(bindings.size, 0);
 }
 console.log('Extension regressions passed: destination/reset barriers, late signals/errors, lifecycle, NumLock and repeat flags.');

@@ -50,6 +50,7 @@ type DaemonStatus struct {
 	ActivePreset            string          `json:"active_preset"`
 	AvailablePresets        []string        `json:"available_presets"`
 	RawMicStreams           []string        `json:"raw_mic_streams"`
+	MicMonitoring           bool            `json:"mic_monitoring"`
 }
 
 type DestinationInfo struct {
@@ -101,6 +102,9 @@ type Daemon struct {
 
 func NewDaemon(ctrl *domain.AudioController, pw adapters.PipeWirePort, alsa adapters.AlsaPort, ee adapters.EasyEffectsPort) *Daemon {
 	d := &Daemon{hardware: DefaultConfig(), ctrl: ctrl, pw: pw, alsa: alsa, ee: ee, done: make(chan struct{})}
+	if ctrl != nil && ctrl.PanicState().Active {
+		d.panicSnapshotKnown = true
+	}
 	d.wake = sync.NewCond(&d.qmu)
 	d.updateStatus(nil)
 	go d.worker()
@@ -247,6 +251,7 @@ func (d *Daemon) Export(conn *dbus.Conn) error {
 		"ToggleOutputMute": d.ToggleOutputMute, "ToggleMicMute": d.ToggleMicMute, "TogglePanic": d.TogglePanic,
 		"SelectDestination": d.SelectDestination, "ToggleDestination": d.ToggleDestination, "SelectPreset": d.SelectPreset,
 		"ResetDefaults": d.ResetDefaults, "GetRawMicStreams": d.GetRawMicStreams, "MigrateRawMicStream": d.MigrateRawMicStream,
+		"ToggleMicMonitoring": d.ToggleMicMonitoring, "SetMicMonitoring": d.SetMicMonitoring,
 	}
 	if err := conn.ExportMethodTable(methods, dbus.ObjectPath(DBusPath), DBusInterface); err != nil {
 		return err
@@ -274,6 +279,7 @@ func (d *Daemon) updateStatus(err error) {
 	d.status.MicPhysicalMuted = mic.PhysicalMuted
 	d.status.MicPrivacyMuted = d.status.ObservedMicVirtualMute != nil && d.status.ObservedMicPhysicalMute != nil && *d.status.ObservedMicVirtualMute && *d.status.ObservedMicPhysicalMute
 	d.status.PanicActive = d.ctrl.PanicState().Active
+	d.status.MicMonitoring = d.ctrl.MicMonitoring()
 	d.status.ActivePreset = d.ctrl.ActiveOutputPreset()
 	d.status.ObserveOnly = d.observeOnly
 	if err == nil && d.status.ObservedOutputMute != nil && *d.status.ObservedOutputMute != d.ctrl.OutputMuted() {
@@ -364,7 +370,12 @@ func (d *Daemon) refresh(ctx context.Context) error {
 	d.status.ObservedDestination = route
 	preset, presetErr := d.ee.GetActivePreset(ctx)
 	d.status.ObservedPreset = preset
-	return errors.Join(graphErr, devicesErr, e1, e2, routeErr, presetErr, read(d.hardware.VirtualSink, &d.status.ObservedOutputMute), read(d.hardware.VirtualSource, &d.status.ObservedMicVirtualMute), read(d.hardware.PhysicalMicrophonePrefix, &d.status.ObservedMicPhysicalMute))
+	mon, monErr := d.pw.GetMicMonitoring(ctx, d.hardware.VirtualSource, d.hardware.VirtualSink)
+	if monErr == nil {
+		d.ctrl.SetMicMonitoring(mon)
+		d.status.MicMonitoring = mon
+	}
+	return errors.Join(graphErr, devicesErr, e1, e2, routeErr, presetErr, monErr, read(d.hardware.VirtualSink, &d.status.ObservedOutputMute), read(d.hardware.VirtualSource, &d.status.ObservedMicVirtualMute), read(d.hardware.PhysicalMicrophonePrefix, &d.status.ObservedMicPhysicalMute))
 }
 
 // Observe refreshes graph-dependent alerts and observed mutes without modifying hardware.
@@ -451,9 +462,11 @@ func (d *Daemon) InitHardware(ctx context.Context) error {
 		} else {
 			// RESTART WITHIN SAME SESSION:
 			// Adopt observed mutes to respect existing user privacy
-			d.ctrl.SetMicrophoneState(*d.status.ObservedMicVirtualMute, *d.status.ObservedMicPhysicalMute, d.ctrl.Microphone().PostDSPLevel)
-			if *d.status.ObservedOutputMute != d.ctrl.OutputMuted() {
-				d.ctrl.ToggleOutputMute()
+			if !d.ctrl.PanicState().Active {
+				d.ctrl.SetMicrophoneState(*d.status.ObservedMicVirtualMute, *d.status.ObservedMicPhysicalMute, d.ctrl.Microphone().PostDSPLevel)
+				if *d.status.ObservedOutputMute != d.ctrl.OutputMuted() {
+					d.ctrl.ToggleOutputMute()
+				}
 			}
 		}
 
@@ -633,7 +646,10 @@ func (d *Daemon) ensureDSPBindings(ctx context.Context, dest *domain.Destination
 	if err := d.ee.EnsureDevices(ctx, dest.PhysicalSinkName, graph.PhysicalMicrophone); err != nil {
 		return err
 	}
-	return d.pw.EnsureDefaultSink(ctx, d.hardware.VirtualSink)
+	if err := d.pw.EnsureDefaultSink(ctx, d.hardware.VirtualSink); err != nil {
+		return err
+	}
+	return d.pw.EnsureDefaultSource(ctx, d.hardware.VirtualSource)
 }
 func (d *Daemon) GetStatus() (string, *dbus.Error) {
 	return d.statusJSON.Load().(string), nil
@@ -895,7 +911,15 @@ func (d *Daemon) panicSnapshot(ctx context.Context) ([3]bool, error) {
 			defer group.Done()
 			bounded, cancel := context.WithTimeout(ctx, 3*time.Second)
 			defer cancel()
-			values[i], errs[i] = d.pw.GetNodeMute(bounded, node)
+			val, err := d.pw.GetNodeMute(bounded, node)
+			if err != nil && node == d.hardware.PhysicalMicrophonePrefix {
+				if strings.Contains(err.Error(), "unavailable") || strings.Contains(err.Error(), "not found") {
+					values[i] = true
+					return
+				}
+			}
+			values[i] = val
+			errs[i] = err
 		}()
 	}
 	group.Wait()
@@ -916,7 +940,17 @@ func (d *Daemon) panicMutes(ctx context.Context) error {
 			defer group.Done()
 			bounded, cancel := context.WithTimeout(ctx, 3*time.Second)
 			defer cancel()
-			errs[i] = d.mute(bounded, target.node, target.want, target.observed)
+			err := d.mute(bounded, target.node, target.want, target.observed)
+			if err != nil && target.node == d.hardware.PhysicalMicrophonePrefix {
+				if target.want && (strings.Contains(err.Error(), "unavailable") || strings.Contains(err.Error(), "not found")) {
+					m := true
+					if target.observed != nil {
+						*target.observed = &m
+					}
+					return
+				}
+			}
+			errs[i] = err
 		}()
 	}
 	group.Wait()
@@ -939,4 +973,45 @@ func (d *Daemon) MigrateRawMicStream(application string) *dbus.Error {
 		d.status.RawMicStreams = raw
 		return nil
 	})
+}
+
+// ToggleMicMonitoring enables or disables routing filtered mic audio to the active playback output.
+func (d *Daemon) ToggleMicMonitoring() (bool, *dbus.Error) {
+	var value bool
+	err := d.execute(false, func(ctx context.Context) error {
+		if err := d.control(); err != nil {
+			return err
+		}
+		current, err := d.pw.GetMicMonitoring(ctx, d.hardware.VirtualSource, d.hardware.VirtualSink)
+		if err != nil {
+			current = d.ctrl.MicMonitoring()
+		}
+		target := !current
+		if err := d.pw.SetMicMonitoring(ctx, d.hardware.VirtualSource, d.hardware.VirtualSink, target); err != nil {
+			return err
+		}
+		d.ctrl.SetMicMonitoring(target)
+		d.status.MicMonitoring = target
+		value = target
+		return nil
+	})
+	return value, err
+}
+
+// SetMicMonitoring directly sets the mic monitoring state.
+func (d *Daemon) SetMicMonitoring(enabled bool) (bool, *dbus.Error) {
+	var value bool
+	err := d.execute(false, func(ctx context.Context) error {
+		if err := d.control(); err != nil {
+			return err
+		}
+		if err := d.pw.SetMicMonitoring(ctx, d.hardware.VirtualSource, d.hardware.VirtualSink, enabled); err != nil {
+			return err
+		}
+		d.ctrl.SetMicMonitoring(enabled)
+		d.status.MicMonitoring = enabled
+		value = enabled
+		return nil
+	})
+	return value, err
 }

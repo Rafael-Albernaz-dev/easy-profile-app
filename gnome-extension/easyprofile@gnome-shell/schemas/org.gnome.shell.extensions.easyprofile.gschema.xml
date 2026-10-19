@@ -63,10 +63,10 @@
       <summary>Resetar Padrão Diário preservando mute do microfone</summary>
     </key>
 
-    <!-- Unassigned No-Op Keys when NumLock is ON (Consume & Discard) -->
+    <!-- Key 7: Toggle Escuta do Microfone com Filtros -->
     <key name="shortcut-noop-7" type="as">
       <default><![CDATA[['KP_7']]]></default>
-      <summary>No-Op Silencioso 7</summary>
+      <summary>Toggle Escuta do Microfone com Filtros</summary>
     </key>
     <key name="shortcut-noop-8" type="as">
       <default><![CDATA[['KP_8']]]></default>

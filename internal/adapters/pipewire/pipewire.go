@@ -79,64 +79,81 @@ func (r *RealPipeWire) FindNodeID(ctx context.Context, nodeName string) (int, er
 	}
 
 	r.mu.RLock()
-	generation := r.cacheGeneration
 	if id, ok := r.nodeIDCache[nodeName]; ok && id > 0 {
 		r.mu.RUnlock()
 		return id, nil
 	}
 	r.mu.RUnlock()
 
-	ctx, cancel := context.WithTimeout(ctx, r.timeout)
-	defer cancel()
+	var lastErr error
+	for attempt := 0; attempt < 3; attempt++ {
+		bCtx, cancel := context.WithTimeout(ctx, r.timeout)
+		cmd := exec.CommandContext(bCtx, "pw-dump", "--no-colors")
+		var stdout, stderr bytes.Buffer
+		cmd.Stdout = &stdout
+		cmd.Stderr = &stderr
 
-	cmd := exec.CommandContext(ctx, "pw-dump", "--no-colors")
-	var stdout, stderr bytes.Buffer
-	cmd.Stdout = &stdout
-	cmd.Stderr = &stderr
+		if err := cmd.Run(); err != nil {
+			cancel()
+			r.InvalidateCache()
+			lastErr = fmt.Errorf("pw-dump failed: %w (stderr: %s)", err, stderr.String())
+			continue
+		}
+		cancel()
 
-	if err := cmd.Run(); err != nil {
-		r.InvalidateCache()
-		return 0, fmt.Errorf("pw-dump failed: %w (stderr: %s)", err, stderr.String())
-	}
-
-	g, err := inspect.ParseGraph(stdout.Bytes())
-	if err != nil {
-		r.InvalidateCache()
-		return 0, fmt.Errorf("failed to parse pw-dump graph: %w", err)
-	}
-
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	if generation != r.cacheGeneration {
-		return 0, errors.New("PipeWire graph changed during node resolution; retry")
-	}
-	if r.nodeIDCache == nil {
-		r.nodeIDCache = make(map[string]int)
-	}
-
-	targetID := 0
-	if nodeName == r.micPrefix {
-		mic, err := resolveMicrophone(g, nodeName)
+		g, err := inspect.ParseGraph(stdout.Bytes())
 		if err != nil {
-			return 0, err
+			r.InvalidateCache()
+			lastErr = fmt.Errorf("failed to parse pw-dump graph: %w", err)
+			continue
 		}
-		targetID = mic.ID
-	}
-	for id, node := range g.Nodes {
-		if nodeName != r.micPrefix && node.Name == nodeName {
-			if targetID != 0 {
-				return 0, fmt.Errorf("ambiguous node identity %q", nodeName)
-			}
-			targetID = id
-		}
-	}
 
-	if targetID == 0 {
-		return 0, fmt.Errorf("%w: %q", ErrNodeNotFound, nodeName)
+		r.mu.Lock()
+		if id, ok := r.nodeIDCache[nodeName]; ok && id > 0 {
+			r.mu.Unlock()
+			return id, nil
+		}
+		if r.nodeIDCache == nil {
+			r.nodeIDCache = make(map[string]int)
+		}
+		if r.cacheSerials == nil {
+			r.cacheSerials = make(map[string]int)
+		}
+
+		for id, node := range g.Nodes {
+			if node.Name != "" {
+				r.nodeIDCache[node.Name] = id
+				r.cacheSerials[node.Name] = node.Serial
+			}
+		}
+
+		targetID := 0
+		if nodeName == r.micPrefix {
+			mic, err := resolveMicrophone(g, nodeName)
+			if err != nil {
+				r.mu.Unlock()
+				lastErr = err
+				continue
+			}
+			targetID = mic.ID
+			r.nodeIDCache[nodeName] = targetID
+			r.cacheSerials[nodeName] = mic.Serial
+		} else {
+			targetID = r.nodeIDCache[nodeName]
+		}
+
+		if targetID == 0 {
+			r.mu.Unlock()
+			lastErr = fmt.Errorf("%w: %q", ErrNodeNotFound, nodeName)
+			continue
+		}
+		r.mu.Unlock()
+		return targetID, nil
 	}
-	r.nodeIDCache[nodeName] = targetID
-	r.cacheSerials[nodeName] = g.Nodes[targetID].Serial
-	return targetID, nil
+	if lastErr != nil {
+		return 0, lastErr
+	}
+	return 0, fmt.Errorf("%w: %q", ErrNodeNotFound, nodeName)
 }
 
 // EnsureMonitorChannelVolumes writes SPA Props.params and confirms a fresh readback.
@@ -447,10 +464,11 @@ func (r *RealPipeWire) Watch(ctx context.Context, events chan<- struct{}) error 
 			if obj.Type != "" {
 				types[obj.ID] = kind
 			}
-			if strings.HasSuffix(kind, ":Node") || strings.HasSuffix(kind, ":Link") || strings.HasSuffix(kind, ":Device") || string(obj.Info) == "null" {
+			isAudioObject := strings.HasSuffix(kind, ":Node") || strings.HasSuffix(kind, ":Link") || strings.HasSuffix(kind, ":Device")
+			if isAudioObject || (kind == "" && string(obj.Info) == "null") {
 				relevant = true
 			}
-			if strings.HasSuffix(kind, ":Node") || strings.HasSuffix(kind, ":Device") || string(obj.Info) == "null" {
+			if (strings.HasSuffix(kind, ":Node") || strings.HasSuffix(kind, ":Device") || kind == "") && string(obj.Info) == "null" {
 				r.invalidateObject(obj.ID)
 			}
 			if string(obj.Info) == "null" {
@@ -555,4 +573,75 @@ func (r *RealPipeWire) observeGraph(g *inspect.Graph) {
 	for _, n := range g.Nodes {
 		r.monitorVolumes[n.Name] = n.MonitorChannelVolumes != nil && *n.MonitorChannelVolumes
 	}
+}
+
+// SetMicMonitoring links or unlinks filtered microphone audio (easyeffects_source) to playback (easyeffects_sink).
+func (r *RealPipeWire) SetMicMonitoring(ctx context.Context, sourceNode, sinkNode string, enabled bool) error {
+	if err := r.checkTestMode(); err != nil {
+		return err
+	}
+
+	linked, _ := r.GetMicMonitoring(ctx, sourceNode, sinkNode)
+	if linked == enabled {
+		return nil
+	}
+
+	ctx, cancel := context.WithTimeout(ctx, r.timeout)
+	defer cancel()
+
+	pairs := [][2]string{
+		{sourceNode + ":capture_FL", sinkNode + ":playback_FL"},
+		{sourceNode + ":capture_FR", sinkNode + ":playback_FR"},
+	}
+
+	for _, pair := range pairs {
+		var cmd *exec.Cmd
+		if enabled {
+			cmd = exec.CommandContext(ctx, "pw-link", pair[0], pair[1])
+		} else {
+			cmd = exec.CommandContext(ctx, "pw-link", "-d", pair[0], pair[1])
+		}
+		_ = cmd.Run()
+	}
+
+	after, err := r.GetMicMonitoring(ctx, sourceNode, sinkNode)
+	if err != nil {
+		return err
+	}
+	if after != enabled {
+		return fmt.Errorf("mic monitoring state mismatch: wanted %v, got %v", enabled, after)
+	}
+	return nil
+}
+
+// GetMicMonitoring checks if active links exist between sourceNode and sinkNode.
+func (r *RealPipeWire) GetMicMonitoring(ctx context.Context, sourceNode, sinkNode string) (bool, error) {
+	if err := r.checkTestMode(); err != nil {
+		return false, err
+	}
+
+	g, err := r.graph(ctx)
+	if err != nil {
+		return false, err
+	}
+
+	var sourceID, sinkID int
+	for id, n := range g.Nodes {
+		if n.Name == sourceNode {
+			sourceID = id
+		}
+		if n.Name == sinkNode {
+			sinkID = id
+		}
+	}
+	if sourceID == 0 || sinkID == 0 {
+		return false, nil
+	}
+
+	for _, link := range g.Links {
+		if link.OutNode == sourceID && link.InNode == sinkID {
+			return true, nil
+		}
+	}
+	return false, nil
 }

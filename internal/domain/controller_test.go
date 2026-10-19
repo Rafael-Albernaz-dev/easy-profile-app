@@ -244,3 +244,20 @@ func TestAudioController_VolumeStep1Percent(t *testing.T) {
 		t.Errorf("expected 80%% after StepMicLevel(-1), got %d%%", newMic.Percent())
 	}
 }
+
+func TestAudioController_MicMonitoring(t *testing.T) {
+	ctrl := domain.NewAudioController(nil)
+	if ctrl.MicMonitoring() {
+		t.Errorf("expected mic monitoring to be false by default")
+	}
+
+	toggled := ctrl.ToggleMicMonitoring()
+	if !toggled || !ctrl.MicMonitoring() {
+		t.Errorf("expected mic monitoring to be true after toggle")
+	}
+
+	ctrl.SetMicMonitoring(false)
+	if ctrl.MicMonitoring() {
+		t.Errorf("expected mic monitoring to be false after SetMicMonitoring(false)")
+	}
+}

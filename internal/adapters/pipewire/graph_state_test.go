@@ -78,4 +78,7 @@ func TestGraphAndDefaultOperationsCannotEscapeTestMode(t *testing.T) {
 	if err := real.EnsureDefaultSink(context.Background(), "sink"); err != ErrTestModeBlocked {
 		t.Fatal(err)
 	}
+	if err := real.EnsureDefaultSource(context.Background(), "source"); err != ErrTestModeBlocked {
+		t.Fatal(err)
+	}
 }

@@ -75,9 +75,9 @@ export default class EasyProfileExtension extends Extension {
 
         this._settings = null;
         this._status = null;
-        for (const field of ['_box', '_icon', '_label', '_muteBadge', '_micMuteBadge', '_menu',
+        for (const field of ['_box', '_icon', '_label', '_muteBadge', '_micMuteBadge', '_listenBadge', '_menu',
             '_routeBox', '_btnAKG', '_btnSP166', '_volItem', '_volIcon', '_volSlider',
-            '_btnMuteOut', '_micItem', '_micIcon', '_micSlider', '_btnMuteMic',
+            '_btnMuteOut', '_micItem', '_micIcon', '_micSlider', '_btnMuteMic', '_micListenItem',
             '_presetsSubMenu', '_warningBanner', '_rawStreamMenu']) this[field] = null;
         this._keymap = null;
     }
@@ -106,6 +106,13 @@ export default class EasyProfileExtension extends Extension {
             visible: false,
         });
         this._box.add_child(this._micMuteBadge);
+        this._listenBadge = new St.Icon({
+            icon_name: 'audio-headset-symbolic',
+            style_class: 'system-status-icon',
+            style: 'color: #3584e4;',
+            visible: false,
+        });
+        this._box.add_child(this._listenBadge);
         this._box.add_child(this._label);
         this._indicator.add_child(this._box);
 
@@ -198,6 +205,18 @@ export default class EasyProfileExtension extends Extension {
         this._micItem.add_child(this._btnMuteMic);
         this._menu.addMenuItem(this._micItem);
 
+        // Mic Monitoring / Listen Button
+        this._micListenItem = new PopupMenu.PopupSwitchMenuItem('Escutar microfone (com filtros) [7]', false);
+        this._micListenItem.connect('toggled', (_item, state) => {
+            if (this._updatingListen) return;
+            this._callDBus('ToggleMicMonitoring', [], err => {
+                if (!err && state && (this._status?.mic_privacy_muted || this._status?.mic_virtual_muted || this._status?.mic_physical_muted)) {
+                    this._callDBus('ToggleMicMute', []);
+                }
+            });
+        });
+        this._menu.addMenuItem(this._micListenItem);
+
         this._menu.addMenuItem(new PopupMenu.PopupSeparatorMenuItem());
 
         // Presets Submenu
@@ -211,9 +230,9 @@ export default class EasyProfileExtension extends Extension {
 
         // Restart Daemon Button
         this._menu.addMenuItem(new PopupMenu.PopupSeparatorMenuItem());
-        const restartItem = new PopupMenu.PopupMenuItem('🔄 Reiniciar EasyProfile');
-        restartItem.connect('activate', () => this._restartDaemon());
-        this._menu.addMenuItem(restartItem);
+        this._restartItem = new PopupMenu.PopupMenuItem('🔄 Reiniciar EasyProfile');
+        this._restartItem.connect('activate', () => this._restartDaemon());
+        this._menu.addMenuItem(this._restartItem);
 
         // Raw Mic Stream Warning Banner
         this._warningBanner = new PopupMenu.PopupMenuItem('⚠️ Aplicativo acessando mic físico!', {reactive: false});
@@ -227,6 +246,7 @@ export default class EasyProfileExtension extends Extension {
     _restartDaemon() {
         this._invalidateLevels();
         const generation = this._generation;
+        this._showOSD('Iniciando EasyProfile...', 'system-run-symbolic');
         try {
             const proc = Gio.Subprocess.new(
                 ['systemctl', '--user', 'restart', 'easyprofiled.service'],
@@ -235,8 +255,14 @@ export default class EasyProfileExtension extends Extension {
             proc.wait_async(this._cancellable, (process, result) => {
                 try {
                     process.wait_finish(result);
-                    if (this._enabled && generation === this._generation && !process.get_successful())
-                        this._showOSD('Falha ao reiniciar EasyProfile', 'dialog-error-symbolic');
+                    if (this._enabled && generation === this._generation) {
+                        if (!process.get_successful()) {
+                            this._showOSD('Falha ao reiniciar EasyProfile', 'dialog-error-symbolic');
+                        } else {
+                            this._showOSD('EasyProfile reiniciado!', 'emblem-ok-symbolic');
+                            this._initDBus();
+                        }
+                    }
                 } catch (error) {
                     if (this._enabled && generation === this._generation)
                         this._showOSD(error.message, 'dialog-error-symbolic');
@@ -247,19 +273,23 @@ export default class EasyProfileExtension extends Extension {
 
     _setConnected(connected) {
         if (!this._enabled) return;
-        this._menu.box.reactive = connected;
-        this._volItem.reactive = connected;
-        this._micItem.reactive = connected;
-        this._btnAKG.reactive = connected;
-        this._btnSP166.reactive = connected;
+        if (this._volItem) this._volItem.reactive = connected;
+        if (this._micItem) this._micItem.reactive = connected;
+        if (this._btnAKG) this._btnAKG.reactive = connected;
+        if (this._btnSP166) this._btnSP166.reactive = connected;
+        if (this._presetsSubMenu) this._presetsSubMenu.reactive = connected;
+        if (this._restartItem?.label?.set_text) {
+            this._restartItem.label.set_text(connected ? '🔄 Reiniciar EasyProfile' : '⚡ Forçar Ativação do EasyProfile');
+        }
         if (!connected) {
             this._invalidateLevels();
             this._barriers = [];
             this._status = null;
-            this._label.set_text('EasyProfile desconectado');
-            this._icon.set_icon_name('network-offline-symbolic');
-            this._muteBadge.visible = false;
-            this._micMuteBadge.visible = false;
+            if (this._label?.set_text) this._label.set_text('EasyProfile desconectado (clique para ativar)');
+            if (this._icon?.set_icon_name) this._icon.set_icon_name('network-offline-symbolic');
+            if (this._muteBadge) this._muteBadge.visible = false;
+            if (this._micMuteBadge) this._micMuteBadge.visible = false;
+            if (this._listenBadge) this._listenBadge.visible = false;
         }
     }
 
@@ -319,16 +349,35 @@ export default class EasyProfileExtension extends Extension {
     _onStateChanged(statusJson) {
         try {
             const s = JSON.parse(statusJson);
+            const prev = this._status;
             if (this._status?.active_destination?.id !== s.active_destination.id)
                 this._invalidateLevels();
             this._status = s;
 
+            // Trigger OSD on profile/destination or preset change
+            if (prev) {
+                const destChanged = prev.active_destination?.id !== s.active_destination?.id;
+                const presetChanged = prev.active_preset && s.active_preset && prev.active_preset !== s.active_preset;
+                if (destChanged) {
+                    const isAKG = s.active_destination?.id === 'akg';
+                    const icon = isAKG ? 'audio-headphones-symbolic' : 'audio-speakers-symbolic';
+                    const name = s.active_destination?.display_name || (isAKG ? 'Fone AKG K52' : 'Caixas SP166');
+                    const presetInfo = s.active_preset ? `\nPreset: ${s.active_preset}` : '';
+                    this._showOSD(`${name}${presetInfo}`, icon, 2000);
+                } else if (presetChanged) {
+                    const isAKG = s.active_destination?.id === 'akg';
+                    const icon = isAKG ? 'audio-headphones-symbolic' : 'audio-speakers-symbolic';
+                    this._showOSD(`Preset: ${s.active_preset}\n(${s.active_destination?.display_name || ''})`, icon, 2000);
+                }
+            }
+
             // 1. Update Top Bar Icon & Label
             const isAKG = s.active_destination.id === 'akg';
             let iconName = isAKG ? 'audio-headphones-symbolic' : 'audio-speakers-symbolic';
-            this._muteBadge.visible = Boolean(s.observed_output_mute);
-            this._micMuteBadge.visible = Boolean(s.mic_privacy_muted || s.mic_virtual_muted || s.mic_physical_muted);
-            this._icon.set_icon_name(iconName);
+            if (this._muteBadge) this._muteBadge.visible = Boolean(s.observed_output_mute);
+            if (this._micMuteBadge) this._micMuteBadge.visible = Boolean(s.mic_privacy_muted || s.mic_virtual_muted || s.mic_physical_muted);
+            if (this._listenBadge) this._listenBadge.visible = Boolean(s.mic_monitoring);
+            if (this._icon?.set_icon_name) this._icon.set_icon_name(iconName);
 
             this._updateLabel();
 
@@ -358,6 +407,13 @@ export default class EasyProfileExtension extends Extension {
                 this._btnMuteMic.add_style_pseudo_class('active');
             } else {
                 this._btnMuteMic.remove_style_pseudo_class('active');
+            }
+
+            // Update Mic Monitoring Switch
+            if (this._micListenItem) {
+                this._updatingListen = true;
+                this._micListenItem.setToggleState(Boolean(s.mic_monitoring));
+                this._updatingListen = false;
             }
 
             // 5. Update Presets Submenu
@@ -439,19 +495,24 @@ export default class EasyProfileExtension extends Extension {
         }
         const generation = this._generation;
         const owner = this._proxy.g_name_owner;
-        try { this._proxy[`${method}Remote`](...args, (_res, error) => {
-            if (!this._enabled || generation !== this._generation || owner !== this._proxy?.g_name_owner) {
-                done?.(new Error('obsolete D-Bus call'));
-                return;
+        try {
+            if (typeof this._proxy[`${method}Remote`] !== 'function') {
+                throw new Error(`Método ${method} indisponível`);
             }
-            if (error) {
-                const msg = error.message.replace(/^GDBus\.Error:[a-zA-Z0-9_.]+: /, '');
-                this._showOSD(`Falha: ${msg}`, 'dialog-error-symbolic');
-                done?.(error);
-                return;
-            }
-            done?.(null);
-        }, this._cancellable); } catch (error) {
+            this._proxy[`${method}Remote`](...args, (_res, error) => {
+                if (!this._enabled || generation !== this._generation || owner !== this._proxy?.g_name_owner) {
+                    done?.(new Error('obsolete D-Bus call'));
+                    return;
+                }
+                if (error) {
+                    const msg = error.message.replace(/^GDBus\.Error:[a-zA-Z0-9_.]+: /, '');
+                    this._showOSD(`Falha: ${msg}`, 'dialog-error-symbolic');
+                    done?.(error);
+                    return;
+                }
+                done?.(null);
+            }, this._cancellable);
+        } catch (error) {
             this._showOSD(error.message, 'dialog-error-symbolic');
             done?.(error);
         }
@@ -575,20 +636,26 @@ export default class EasyProfileExtension extends Extension {
                 this._queueLevel(this._targetChannel, -1, false);
             }},
 
-            // 3) TECLA "1": seleciona o AKG K52 (se já ativo, no-op; restaura foco para saída)
+            // 3) TECLA "1": seleciona o AKG K52 (se já ativo, feedback OSD; restaura foco para saída)
             {name: 'shortcut-dest-akg', flags: noRepeat, handler: () => {
                 this._targetChannel = 'out';
                 if (this._status?.active_destination?.id !== 'akg') {
                     this._callDBus('SelectDestination', ['akg']);
+                } else {
+                    const preset = this._status?.active_preset ? `\nPreset: ${this._status.active_preset}` : '';
+                    this._showOSD(`Fone AKG K52 (ativo)${preset}`, 'audio-headphones-symbolic', 2000);
                 }
                 this._updateLabel();
             }},
 
-            // 4) TECLA "2": seleciona o SP166 (se já ativo, no-op; restaura foco para saída)
+            // 4) TECLA "2": seleciona o SP166 (se já ativo, feedback OSD; restaura foco para saída)
             {name: 'shortcut-dest-sp166', flags: noRepeat, handler: () => {
                 this._targetChannel = 'out';
                 if (this._status?.active_destination?.id !== 'sp166') {
                     this._callDBus('SelectDestination', ['sp166']);
+                } else {
+                    const preset = this._status?.active_preset ? `\nPreset: ${this._status.active_preset}` : '';
+                    this._showOSD(`Caixas SP166 (ativo)${preset}`, 'audio-speakers-symbolic', 2000);
                 }
                 this._updateLabel();
             }},
@@ -596,6 +663,12 @@ export default class EasyProfileExtension extends Extension {
             // 8) TECLA "3": seleciona o microfone para ajuste com "+" ou "-"
             {name: 'shortcut-select-mic', flags: noRepeat, handler: () => {
                 this._targetChannel = (this._targetChannel === 'mic') ? 'out' : 'mic';
+                const isMic = this._targetChannel === 'mic';
+                this._showOSD(
+                    isMic ? '🎙️ Foco: Ganho do Microfone (+/-)' : '🔊 Foco: Volume da Saída (+/-)',
+                    isMic ? 'audio-input-microphone-symbolic' : 'audio-volume-high-symbolic',
+                    1500
+                );
                 this._updateLabel();
             }},
 
@@ -626,7 +699,15 @@ export default class EasyProfileExtension extends Extension {
 
             // 7) TECLA "ENTER": muta/desmuta saída e entrada (Pânico / Mute All)
             {name: 'shortcut-mute-panic', flags: noRepeat, handler: () => {
-                this._callDBus('TogglePanic', []);
+                this._callDBus('TogglePanic', [], err => {
+                    if (!err) {
+                        const panic = this._status?.panic_active;
+                        this._showOSD(
+                            panic ? '🚨 PÂNICO ATIVADO (Tudo Mutado)' : '✓ Pânico Desativado (Áudio Restaurado)',
+                            panic ? 'dialog-warning-symbolic' : 'audio-volume-high-symbolic'
+                        );
+                    }
+                });
             }},
 
             // 13) TECLA "/": ativa DynamicEqualizer (placeholder)
@@ -636,11 +717,30 @@ export default class EasyProfileExtension extends Extension {
 
             // '*' restores daily levels/preset while preserving mic mutes; no restart.
             {name: 'shortcut-reset-app', flags: noRepeat, handler: () => {
-                this._callDBus('ResetDefaults', []);
+                this._callDBus('ResetDefaults', [], err => {
+                    if (!err) {
+                        this._showOSD('✓ Padrão Diário Restaurado\nAKG K52 (95%) • Mic (100%)', 'audio-headphones-symbolic', 2000);
+                    }
+                });
             }},
 
-            // 15) TECLAS "7, 8 e 9": pausadas / No-Op silencioso
-            {name: 'shortcut-noop-7', flags: noRepeat, handler: () => {}},
+            // 14) TECLA "7": escutar microfone com os filtros (Toggle)
+            {name: 'shortcut-noop-7', flags: noRepeat, handler: () => {
+                const nextActive = !this._status?.mic_monitoring;
+                this._callDBus('ToggleMicMonitoring', [], err => {
+                    if (!err) {
+                        if (nextActive && (this._status?.mic_privacy_muted || this._status?.mic_virtual_muted || this._status?.mic_physical_muted)) {
+                            this._callDBus('ToggleMicMute', []);
+                            this._showOSD('🎧 Escuta Ativada (Mic Desmutado)', 'audio-headset-symbolic');
+                        } else {
+                            this._showOSD(
+                                nextActive ? '🎧 Escuta do Microfone: Ativada' : 'Escuta do Microfone: Desativada',
+                                'audio-headset-symbolic'
+                            );
+                        }
+                    }
+                });
+            }},
             {name: 'shortcut-noop-8', flags: noRepeat, handler: () => {}},
             {name: 'shortcut-noop-9', flags: noRepeat, handler: () => {}},
         ];
@@ -663,15 +763,31 @@ export default class EasyProfileExtension extends Extension {
         this._keybindingKeys = [];
     }
 
-    _showOSD(message, iconName) {
+    _showOSD(message, iconName, durationMs = 1500) {
         try {
+            const icon = Gio.ThemedIcon.new(iconName || 'audio-volume-high-symbolic');
             Main.osdWindowManager.show(
                 -1,
-                Gio.ThemedIcon.new(iconName || 'audio-volume-high-symbolic'),
+                icon,
                 message,
                 null,
                 null
             );
+            if (durationMs > 1500) {
+                const repeatCount = Math.floor((durationMs - 500) / 1000);
+                for (let i = 1; i <= repeatCount; i++) {
+                    const source = GLib.timeout_add(GLib.PRIORITY_DEFAULT, i * 1000, () => {
+                        this._retrySources?.delete(source);
+                        if (this._enabled) {
+                            try {
+                                Main.osdWindowManager.show(-1, icon, message, null, null);
+                            } catch (_e) {}
+                        }
+                        return GLib.SOURCE_REMOVE;
+                    });
+                    this._retrySources?.add(source);
+                }
+            }
         } catch (_e) {}
     }
 

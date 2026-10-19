@@ -26,6 +26,7 @@ type FakePipeWire struct {
 	PhysicalMicrophone    string
 	GraphErr              error
 	DefaultErr            error
+	MicMonitoring         bool
 }
 
 var _ adapters.PipeWirePort = (*FakePipeWire)(nil)
@@ -58,6 +59,16 @@ func (f *FakePipeWire) EnsureDefaultSink(ctx context.Context, sink string) error
 	}
 	f.DefaultSink, f.ConfiguredSink = sink, sink
 	f.Calls = append(f.Calls, "EnsureDefaultSink:"+sink)
+	return nil
+}
+
+func (f *FakePipeWire) EnsureDefaultSource(ctx context.Context, source string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.DefaultErr != nil {
+		return f.DefaultErr
+	}
+	f.Calls = append(f.Calls, "EnsureDefaultSource:"+source)
 	return nil
 }
 
@@ -137,4 +148,18 @@ func (f *FakePipeWire) MigrateRawMicStream(ctx context.Context, micPrefix, virtu
 		}
 	}
 	return fmt.Errorf("raw stream not found: %s", application)
+}
+
+func (f *FakePipeWire) SetMicMonitoring(ctx context.Context, sourceNode, sinkNode string, enabled bool) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.MicMonitoring = enabled
+	f.Calls = append(f.Calls, fmt.Sprintf("SetMicMonitoring:%v", enabled))
+	return nil
+}
+
+func (f *FakePipeWire) GetMicMonitoring(ctx context.Context, sourceNode, sinkNode string) (bool, error) {
+	f.mu.RLock()
+	defer f.mu.RUnlock()
+	return f.MicMonitoring, nil
 }

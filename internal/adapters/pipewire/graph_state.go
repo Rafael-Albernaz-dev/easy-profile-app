@@ -101,3 +101,24 @@ func (r *RealPipeWire) EnsureDefaultSink(ctx context.Context, sink string) error
 	}
 	return nil
 }
+
+func (r *RealPipeWire) EnsureDefaultSource(ctx context.Context, source string) error {
+	if err := r.checkTestMode(); err != nil {
+		return err
+	}
+	ctx, cancel := context.WithTimeout(ctx, r.timeout)
+	defer cancel()
+	g, err := r.graph(ctx)
+	if err != nil {
+		return err
+	}
+	if g.Defaults["default.audio.source"] == source && g.Defaults["default.configured.audio.source"] == source {
+		return nil
+	}
+	val := fmt.Sprintf(`{"name":"%s"}`, source)
+	if out, err := exec.CommandContext(ctx, "pw-metadata", "-n", "default", "0", "default.configured.audio.source", val).CombinedOutput(); err != nil {
+		r.InvalidateCache()
+		return fmt.Errorf("set DSP default source: %w: %s", err, out)
+	}
+	return nil
+}

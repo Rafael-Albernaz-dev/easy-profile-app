@@ -56,6 +56,8 @@ func run(args []string, stdout, stderr io.Writer) int {
 		return runPreset(args[1:], stdout, stderr)
 	case "reset":
 		return runReset(args[1:], stdout, stderr)
+	case "listen", "monitor":
+		return runListen(args[1:], stdout, stderr)
 	case "inspect":
 		return runInspect(args[1:], stdout, stderr)
 	case "version", "--version":
@@ -84,6 +86,7 @@ commands:
   panic                   emergency mute all channels or restore previous state
   preset [list|<name>]    list compatible presets or apply a preset
   reset                   restore daily base preset, output 95%, mic 100% (preserves mic mute)
+  listen [on|off|toggle]  toggle or set mic monitoring (listening with DSP filters)
   inspect                 read-only inspection of PipeWire, ALSA, and EasyEffects
   version                 print version`)
 }
@@ -338,6 +341,11 @@ func runStatus(args []string, stdout, stderr io.Writer) int {
 	fmt.Fprintf(stdout, "  Destination:  %s (%s, ceiling: %d%%)\n", s.ActiveDestination.DisplayName, s.ActiveDestination.PortName, s.ActiveDestination.CeilingPct)
 	fmt.Fprintf(stdout, "  Output Vol:   %d%% [%s]\n", s.OutputVolume, outMuteStr)
 	fmt.Fprintf(stdout, "  Mic Level:    %d%% [%s]\n", s.MicLevel, micMuteStr)
+	monStr := "disabled"
+	if s.MicMonitoring {
+		monStr = "ENABLED (listening with filters)"
+	}
+	fmt.Fprintf(stdout, "  Mic Listen:   %s\n", monStr)
 	fmt.Fprintf(stdout, "  Panic Mute:   %s\n", panicStr)
 	fmt.Fprintf(stdout, "  Preset:       %s\n", s.ActivePreset)
 	if len(s.AvailablePresets) > 0 {
@@ -494,6 +502,51 @@ func runPanic(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintln(stdout, "🚨 PANIC MUTE ACTIVE: All outputs and microphone muted.")
 	} else {
 		fmt.Fprintln(stdout, "✓ Exited Panic Mute: Restored prior channel mute states.")
+	}
+	return 0
+}
+
+func runListen(args []string, stdout, stderr io.Writer) int {
+	conn, obj, err := getDBusObject()
+	if err != nil {
+		fmt.Fprintf(stderr, "listen: %v\n", err)
+		return 1
+	}
+	defer conn.Close()
+
+	var active bool
+	if len(args) > 0 {
+		switch args[0] {
+		case "on", "enable", "1", "true":
+			if err := busCall(obj, daemon.DBusInterface+".SetMicMonitoring", 0, true).Store(&active); err != nil {
+				fmt.Fprintf(stderr, "listen call failed: %v\n", err)
+				return 1
+			}
+		case "off", "disable", "0", "false":
+			if err := busCall(obj, daemon.DBusInterface+".SetMicMonitoring", 0, false).Store(&active); err != nil {
+				fmt.Fprintf(stderr, "listen call failed: %v\n", err)
+				return 1
+			}
+		case "toggle":
+			if err := busCall(obj, daemon.DBusInterface+".ToggleMicMonitoring", 0).Store(&active); err != nil {
+				fmt.Fprintf(stderr, "listen toggle failed: %v\n", err)
+				return 1
+			}
+		default:
+			fmt.Fprintf(stderr, "unknown argument %q (use 'on', 'off', or 'toggle')\n", args[0])
+			return 2
+		}
+	} else {
+		if err := busCall(obj, daemon.DBusInterface+".ToggleMicMonitoring", 0).Store(&active); err != nil {
+			fmt.Fprintf(stderr, "listen toggle failed: %v\n", err)
+			return 1
+		}
+	}
+
+	if active {
+		fmt.Fprintln(stdout, "🎧 Microphone monitoring ENABLED (listening with DSP filters).")
+	} else {
+		fmt.Fprintln(stdout, "Microphone monitoring DISABLED.")
 	}
 	return 0
 }

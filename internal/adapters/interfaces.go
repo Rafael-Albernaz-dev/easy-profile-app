@@ -22,6 +22,7 @@ type DSPDevices struct {
 type PipeWirePort interface {
 	ReadGraphState(ctx context.Context, sink, source, physicalSink, micPrefix string) (GraphState, error)
 	EnsureDefaultSink(ctx context.Context, sink string) error
+	EnsureDefaultSource(ctx context.Context, source string) error
 	// EnsureMonitorChannelVolumes activates [ "monitor.channel-volumes", true ] on virtual null-sinks.
 	EnsureMonitorChannelVolumes(ctx context.Context, nodeName string) error
 
@@ -39,6 +40,10 @@ type PipeWirePort interface {
 
 	// GetRawMicStreams inspects the PipeWire graph and returns client app names connected directly to the physical mic.
 	GetRawMicStreams(ctx context.Context, micNodeName string) ([]string, error)
+
+	// SetMicMonitoring links or unlinks filtered microphone audio (easyeffects_source) to playback (easyeffects_sink).
+	SetMicMonitoring(ctx context.Context, sourceNode, sinkNode string, enabled bool) error
+	GetMicMonitoring(ctx context.Context, sourceNode, sinkNode string) (bool, error)
 }
 
 // AlsaPort defines the hardware mixer controls for the integrated sound card.

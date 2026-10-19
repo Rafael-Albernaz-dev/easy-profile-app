@@ -14,6 +14,7 @@ The calibrated setup uses AKG K52 front headphones, SP166 rear speakers and the 
 - Background reconciliation maintains the virtual default sink, EasyEffects input/output device selections and monitor gain, using fresh identity/readbacks. KA-1333 resolution checks USB identity/profile. Cached IDs are invalidated on graph changes and failed calls.
 - Raw microphone captures are reported. Migration is explicit per application, rejects ambiguity and confirms processed links.
 - Status reads use an immutable published snapshot, independently of slow hardware operations. UI level requests carry a destination, and route/reset barriers discard pending levels and wait for calls already sent.
+- Microphone monitoring (post-DSP sidetone) creates dedicated PipeWire links from `easyeffects_source` to `easyeffects_sink`. A blue headset panel icon indicates active monitoring, and enabling monitoring automatically un-mutes the microphone if muted.
 
 Automated tests use in-memory audio adapters with `EASYPROFILE_TEST_MODE=1`. No test may control real audio. Production guards and the three calibrated preset files remain untouched during development. Passing local gates does not certify physical routing, sound quality or GNOME Shell behavior.
 
@@ -35,7 +36,7 @@ Automated tests use in-memory audio adapters with `EASYPROFILE_TEST_MODE=1`. No 
 | `Enter` | Panic: output and microphone mute; toggle restores independent snapshot | No |
 | `/` | DynamicEqualizer placeholder; logs intent, no DSP change | No |
 | `*` | Daily reset: base preset, output 95%, mic 100%; preserves both mic mutes | No |
-| `7` | Reserved, silent no-op | No |
+| `7` | Toggle post-DSP microphone monitoring (sidetone); blue headset panel icon; auto-unmutes mic | No |
 | `8` | Reserved, silent no-op | No |
 | `9` | Reserved, silent no-op | No |
 
@@ -93,6 +94,7 @@ easyprofilectl mic -1
 easyprofilectl mute mic
 easyprofilectl mute out
 easyprofilectl panic
+easyprofilectl listen toggle
 easyprofilectl route akg
 easyprofilectl route sp166
 easyprofilectl preset list

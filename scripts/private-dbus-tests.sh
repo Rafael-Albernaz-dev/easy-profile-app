@@ -64,6 +64,12 @@ rg -q '90%' <<< "${RESULT}"
 "${CTL}" mute mic
 "${CTL}" panic
 "${CTL}" panic
+"${CTL}" listen on
+RESULT="$("${CTL}" status --json)"
+rg -q '"mic_monitoring":true' <<< "${RESULT}"
+"${CTL}" listen off
+RESULT="$("${CTL}" status --json)"
+rg -q '"mic_monitoring":false' <<< "${RESULT}"
 "${CTL}" route sp166
 RESULT="$("${CTL}" preset list)"
 rg -q 'SP166 - Uso diario aprovado' <<< "${RESULT}"

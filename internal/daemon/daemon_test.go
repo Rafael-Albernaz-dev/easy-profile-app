@@ -157,3 +157,50 @@ func TestDaemon_SwitchDestination(t *testing.T) {
 		t.Errorf("expected SP166 preset, got %s", fakeEE.ActivePreset)
 	}
 }
+
+func TestDaemon_MicMonitoring(t *testing.T) {
+	d, fakePW, _, _ := setupTestDaemon(t)
+
+	// Initially disabled
+	if d.ctrl.MicMonitoring() || fakePW.MicMonitoring {
+		t.Errorf("expected mic monitoring to be disabled initially")
+	}
+
+	// Toggle on
+	active, dbusErr := d.ToggleMicMonitoring()
+	if dbusErr != nil || !active {
+		t.Fatalf("ToggleMicMonitoring failed: %v", dbusErr)
+	}
+	if !fakePW.MicMonitoring || !d.ctrl.MicMonitoring() {
+		t.Errorf("expected mic monitoring to be enabled on fake and controller")
+	}
+
+	// Toggle off
+	active, dbusErr = d.ToggleMicMonitoring()
+	if dbusErr != nil || active {
+		t.Fatalf("ToggleMicMonitoring (off) failed: %v", dbusErr)
+	}
+	if fakePW.MicMonitoring || d.ctrl.MicMonitoring() {
+		t.Errorf("expected mic monitoring to be disabled after second toggle")
+	}
+}
+
+func TestDaemon_PanicRestoreOnDaemonRestart(t *testing.T) {
+	d, _, _, _ := setupTestDaemon(t)
+	// Enter panic
+	active, err := d.TogglePanic()
+	if err != nil || !active {
+		t.Fatalf("failed to enter panic: %v", err)
+	}
+
+	// Create new daemon with the same controller (simulating daemon restart with panic active)
+	d2 := NewDaemon(d.ctrl, d.pw, d.alsa, d.ee)
+	// Toggle panic to exit panic
+	active, err = d2.TogglePanic()
+	if err != nil {
+		t.Fatalf("failed to exit panic on restarted daemon: %v", err)
+	}
+	if active {
+		t.Errorf("expected panic to be inactive after exit toggle")
+	}
+}

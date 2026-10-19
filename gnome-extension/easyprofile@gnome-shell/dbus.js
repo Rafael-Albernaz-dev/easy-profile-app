@@ -50,6 +50,13 @@ export const DBusInterface = `
       <arg type="as" direction="out" name="streams"/>
     </method>
     <method name="MigrateRawMicStream"><arg type="s" direction="in" name="application"/></method>
+    <method name="ToggleMicMonitoring">
+      <arg type="b" direction="out" name="active"/>
+    </method>
+    <method name="SetMicMonitoring">
+      <arg type="b" direction="in" name="enabled"/>
+      <arg type="b" direction="out" name="active"/>
+    </method>
     <signal name="StateChanged">
       <arg type="s" name="status_json"/>
     </signal>
