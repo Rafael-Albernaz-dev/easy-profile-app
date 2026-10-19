@@ -1,138 +1,89 @@
-# EasyProfileApp — Documento de Requisitos de Software (DRS), Arquitetura e System Design (v2 — Pós-Auditoria Cruzada)
+# EasyProfileApp — Requisitos e Arquitetura v2 — Remediação
 
-- **Data:** 18/10/2026 (`America/Sao_Paulo`)
-- **Status:** Requisitos e Arquitetura Consolidados após Grill-Me + Auditoria Cruzada Independente (Codex + Hermes)
-- **Ambiente Alvo:** Ubuntu 24.04.5 LTS, GNOME Shell 46.0 (Wayland), PipeWire 1.0.5, WirePlumber 0.4.17, EasyEffects 7.1.6 (APT)
+Data: 19/10/2026. Contrato consolidado a partir da missão de remediação aprovada pelo usuário. Provas locais com fakes não representam homologação acústica, instalação da nova extensão ou autorização de cutover.
 
----
+## 1. Escopo e decisões
 
-## 1. Visão Geral e Resumo das Decisões Consolidadas
+Ferramenta pessoal para Ubuntu 24.04, GNOME Shell 46 Wayland, PipeWire 1.0.5, WirePlumber 0.4.17 e EasyEffects 7.1.6. AKG K52 frontal, SP166 traseiro e mic USB KA-1333. Configuração de identidades, rotas, presets compatíveis e tetos em `config.example.json`.
 
-O **EasyProfileApp** é uma ferramenta pessoal de controle rápido, previsível e seguro de áudio sobre o ecossistema **PipeWire + ALSA + EasyEffects**, projetada para o setup aprovado do usuário (**Microfone USB KA-1333**, **Headphone AKG K52** na saída frontal e **Caixas 2.1 Multi SP166** na saída traseira da placa integrada Realtek ALC887-VD).
+- Go único para CLI/daemon e GJS ESM para GNOME. Session D-Bus é o único IPC: `org.easyprofile.Daemon`, objeto `/org/easyprofile/Daemon`.
+- Sem WebSocket/HTTP ou interfaces ornamentais. Portas PipeWire/ALSA/EasyEffects expressam operações usadas pelo daemon e pelos fakes.
+- `AudioController` encapsula estado desejado, memória por porta, compatibilidade de presets e invariantes de privacidade. Persistência de sessão é pequena, síncrona e atômica; erros aparecem no status e no resultado do comando.
+- Daemon tem um worker serial, prioridade/cancelamento para pânico e agrupamento apenas de volumes adjacentes do mesmo canal/destino. Status é uma string JSON imutável publicada atomicamente, sem adquirir o lock de hardware.
 
-### 1.1 Matriz de Decisões Fechadas (Grill-Me + Correções da Auditoria Técnica)
+## 2. Contrato acústico
 
-| Tema | Decisão Confirmada e Revisada |
-|---|---|
-| **Alcance do Produto** | Ferramenta pessoal otimizada para este setup (Ubuntu 24.04 / GNOME 46), com identidades de hardware, rotas, limites e presets desacoplados em arquivo de configuração (`config.json`). |
-| **Stack & Único IPC** | **Go (Single-Binary Daemon + CLI)** + **GJS (Extensão nativa GNOME Shell 46)** comunicando exclusivamente via **Session D-Bus (`org.easyprofile.Daemon`)** (removida a duplicidade de Unix Socket). |
-| **Interfaces de Usuário** | 1. **Atalhos no Numpad** (quando `NumLock = ON`) + **OSD Nativo do GNOME**.<br>2. **Indicador e Menu no Topo do GNOME Shell (Top Bar / Quick Settings)** com sliders de volume/mic, botões de rota/mute, alerta de mic cru e **dropdown de presets**.<br>3. **CLI rápida** (`easyprofilectl`). |
-| **Destinos de Saída (MVP)** | Alternância exclusiva entre **AKG K52** (`analog-output-headphones`) e **Caixas SP166** (`analog-output-lineout`) na placa `alsa_card.pci-0000_00_1f.3`. Pré-condição verificada: **`Auto-Mute Mode` = `Disabled`** no ALSA, e porta inativa explicitamente mutada (`Headphone` vs `Front`). |
-| **Política de Volume de Saída e Bloqueador `monitor.channel-volumes`** | **Achado Crítico da Auditoria:** No EasyEffects 7.1.6 / PipeWire 1.0.5, `easyeffects_sink` e `easyeffects_source` possuem `monitor.channel-volumes = false` por padrão (suas portas de saída são portas de monitor, onde `channelVolumes`/`mute` comuns do nó não atenuam o som sem essa propriedade ou sem atuar nas `monitorVolumes`/nó físico).<br>- **Política:** Passo de **2%** de `0%` a `100%`, lembrando o último volume usado em cada porta durante a sessão e respeitando o teto físico calibrado (**97% no AKG**, **100% nas Caixas**).<br>- **Contrato da Slice EP-002 (Spike antes do domínio definitivo):** Comprovar e fixar o mecanismo real de atenuação/mute (ex: habilitar `monitor.channel-volumes` / `monitorVolumes` vs controlar o ganho/mute efetivo no ponto correto do grafo) e padronizar a escala (`wpctl` cúbica vs linear). |
-| **Política de Nível do Microfone** | Controle atua **após a cadeia de filtros DSP** de `0%` a `100%` com **passo de 2%**, mantendo o ganho físico USB do KA-1333 intocado para nunca descalibrar Speex/Gate/Compressor/De-Esser/Limiter. |
-| **Política de Mute de Microfone** | **Dual-Mute de Privacidade:** atua tanto na fonte virtual (`easyeffects_source`) quanto na fonte física USB (`alsa_input.usb-MU900_KA-1333...`). Sucesso exige readback confirmado dos dois alvos; falha parcial é reportada como proteção incompleta (`degraded_partial_mute`). |
-| **Mute Conjunto (Pânico) — Snapshot de 3 Booleans** | Tecla `Numpad Enter`. **Correção da Auditoria:** O snapshot de pânico preserva separadamente **`{SavedOutMute, SavedMicVirtualMute, SavedMicPhysicalMute}`** (nunca reduzindo o mic a um único booleano que poderia desmutar o mic físico indevidamente ao sair do pânico!).<br>- **Prioridade e Override Manual:** O comando de Pânico tem prioridade imediata na fila. Se durante o Pânico o usuário acionar manualmente `[0]` (Mute Mic) ou `[.]` (Mute Saída), a escolha manual vence e **atualiza o campo correspondente do snapshot**; quando o usuário apertar `[Enter]` depois para sair do Pânico, o sistema restaura o outro canal e mantém o canal alterado manualmente exatamente como o usuário deixou. |
-| **Monitor de Mic Cru (Stream Guard)** | Inspeciona links ativos no grafo PipeWire (excluindo nós internos do EasyEffects). Se um aplicativo real conectar ao `alsa_input` físico do KA-1333, exibe alerta na Top Bar com ação manual de migração via metadata do WirePlumber (`target.object` / `target.node`) com confirmação dos novos links. **Sem automigração cega no MVP.** |
-| **Numpad & Modo Áudio (`NumLock`)** | A tecla **`NumLock`** é a chave **Modo Áudio ON/OFF** (com ícone na Top Bar), monitorada via `Clutter.get_default_backend().get_default_seat().get_keymap()` (`notify::num-lock-state`).<br>- Ações de toggle (`0`, `.`, `Enter`, `1`, `2`, `3`, `5`) usam a flag nativa **`Meta.KeyBindingFlags.IGNORE_AUTOREPEAT`** do GNOME Shell 46.<br>- As teclas sem função atribuída no Numpad (**`4`, `6`, `7`, `8`, `9`**) também são interceptadas como **No-Op silencioso** quando `NumLock = ON`, impedindo que esbarrar nelas digite números acidentais no código/terminal. |
-| **Múltiplos Presets por Saída & Arbitragem de Autoload** | Seleção de presets adicionais via **Dropdown na UI da Top Bar**, filtrando presets compatíveis com a porta ativa (`AKG` vs `SP166`/`Caixas`).<br>- **Memória de Sessão vence o Autoload:** se o usuário escolheu `"AKG - Rock"` no dropdown, trocou para as Caixas e voltou para o AKG na mesma sessão, o daemon aguarda/reconcilia o evento de autoload do EasyEffects e reaplica `"AKG - Rock"` (confirmando em `com.github.wwmm.easyeffects` → `last-used-output-preset`, `plugins` ativos e `bypass=false`). Só volta para o padrão diário ao apertar `[5] Reset` ou em novo Login. |
-| **Política de Login e Identidade da Sessão Gráfica** | - **No Login:** inicia na porta ativa com Preset Padrão Diário, volume `95%` (teto físico da porta), mic `100%`, e Saída/Mic **Desmutados**.<br>- **Identificação de Sessão (Correção da Auditoria):** A trava de "já inicializado no login" vincula o identificador real da sessão gráfica (`XDG_SESSION_ID` / `GNOME_SHELL_SESSION_MODE` / boot ID do bus D-Bus de sessão) para que reiniciar o daemon não repita o desmute de login, mas um novo login gráfico aplique a política corretamente.<br>- **Na Tecla `[5]` (Reset Base):** restaura Preset Padrão Diário + volumes base (`95%` saída / `100%` mic), mas **NÃO desmuta o microfone** se estiver mutado. |
-| **Segurança dos Guards em Produção** | Os serviços atuais (`ka1333-input-guard.service` e `easyeffects-output-guard.service`) permanecem **ativos e intocados** durante todo o desenvolvimento. No cutover final (`EP-006`), o instalador grava o estado prévio exato (`is-enabled` / `is-active`) de cada unidade para que o rollback restaure exatamente o estado original. |
+**Volumes:** saída virtual e nível pós-DSP do mic vão de 0 a 100%, em passos inteiros de 1%. O domínio usa ganho linear na porta; `wpctl` recebe escala cúbica. O ganho físico USB do mic permanece intocado. O teto físico é ≤97% no AKG e ≤100% no SP166.
 
----
+**Troca de rota:** silenciar sink físico e os dois pinos ALSA; garantir Auto-Mute Disabled; confirmar vínculos DSP; limitar volumes antes de habilitar monitor gain; trocar e confirmar rota; manter pino inativo mutado; estabilizar autoload; aplicar preset de sessão; confirmar níveis/mutes/cadeia; só então liberar o sink físico. Falhas mantêm mute físico e são reportadas.
 
-## 2. Mapa Oficial de Teclas no Numpad (Modo Áudio = `NumLock ON`)
+**Dual-Mute e pânico:** microfone virtual e físico são alvos independentes. O snapshot tem `{SavedOutMute, SavedMicVirtualMute, SavedMicPhysicalMute}`. Overrides manuais atualizam seus campos. Snapshot incompleto jamais autoriza restauração automática. Reset `*` restaura preset diário, saída 95%, mic 100% e preserva os dois mutes atuais do microfone. Reset é também ação no menu/CLI, sem reinício implícito.
 
-Todas as 17 teclas do bloco numérico são capturadas quando `NumLock = ON` para garantir zero vazamento de caracteres na janela ativa:
+**Sessão:** memória de volume/preset é por destino e por identidade de login. Reinício no mesmo login restaura os níveis e preset; login novo recebe base diária. O marcador `login_session.json` é separado de `session.json`, ambos privados e escritos por CreateTemp/Sync/Rename/Sync do diretório. A permissão de login é consumida duravelmente antes de qualquer desmute automático. Se uma etapa posterior falhar, reiniciar adota os mutes observados e não repete o desmute. Marcador inválido/ilegível, identidade desconhecida ou snapshot ausente no mesmo login falham seguros.
 
-```text
-┌───────────┬───────────┬───────────┬───────────┐
-│  NumLock  │     /     │     *     │     -     │
-│ MODO ÁUDIO│ Mic -2%   │ Mic +2%   │ Vol -2%   │
-│  ON / OFF │ (Repeat)  │ (Repeat)  │ (Repeat)  │
-├───────────┼───────────┼───────────┼───────────┤
-│     7     │     8     │     9     │           │
-│ [No-Op /  │ [No-Op /  │ [No-Op /  │     +     │
-│ Silencioso│ Silencioso│ Silencioso│ Vol +2%   │
-├───────────┼───────────┼───────────┤ (Repeat)  │
-│     4     │     5     │     6     │           │
-│ [No-Op /  │   RESET   │ [No-Op /  │           │
-│ Silencioso│  PADRÃO   │ Silencioso│           │
-├───────────┼───────────┼───────────┼───────────┤
-│     1     │     2     │     3     │           │
-│   FONE    │  CAIXAS   │  ALTERNAR │   Enter   │
-│  AKG K52  │   SP166   │ AKG⇄CAIXAS│MUTE TOTAL │
-├───────────┴───────────┼───────────┤ (PÂNICO)  │
-│           0           │  . / ,    │           │
-│       MUTE MIC        │MUTE SAÍDA │           │
-│     (Dual-Mute)       │           │           │
-└───────────────────────┴───────────┴───────────┘
-```
-- **Com `Meta.KeyBindingFlags.IGNORE_AUTOREPEAT`:** `0`, `.`/`,`, `Enter`, `1`, `2`, `3`, `5` e as teclas bloqueadas `4`, `6`, `7`, `8`, `9`.
-- **Com suporte a repetição (Coalescência no Daemon):** `+`, `-`, `*`, `/`.
+**Exclusividade:** flock não bloqueante em `$XDG_RUNTIME_DIR/easyprofile.lock` (fallback `/run/user/<uid>/easyprofile.lock`) antes de carregar sessão e antes de qualquer ação no áudio. O arquivo não é removido ao liberar o lock. A identidade gráfica exige `XDG_SESSION_ID` ou `SESSION_MANAGER`; nomes de sockets reutilizáveis não substituem essa identidade.
 
----
+**Guardas DSP substitutas:** na subida e reconciliação, manter sink virtual como default e configured default; saída do EasyEffects na placa física; entrada do EasyEffects no KA-1333 identificado por USB/perfil; seleção explícita de dispositivos; `monitor.channel-volumes=true` nos dois nós virtuais. Auditoria de grafo e readbacks alimentam `dsp_bound` e `monitor_volumes_confirmed`. Uma reparação necessária usa a sequência protegida, sem autorizar desmute novo do mic em background. Rota externa inesperada recebe mute físico e exige seleção explícita.
 
-## 3. Arquitetura Enxuta e Pragmática
+**Streams crus:** identificar links ativos de captura física que bypassam DSP, alertar e permitir somente migração manual por aplicação. Recusar ambiguidade e confirmar links processados e desaparecimento dos crus.
 
-### 3.1 Componentes e Único IPC (Session D-Bus)
+## 3. Mapa oficial das 17 teclas
 
-```mermaid
-flowchart TB
-    subgraph GNOME ["GNOME Shell 46 (Wayland Compositor - GJS)"]
-        KB["NumLock Keybinder\nClutter.get_default_backend().get_default_seat().get_keymap()\n+ Main.wm.addKeybinding (IGNORE_AUTOREPEAT)"]
-        TB["Top Bar Indicator & Quick Menu\n(Sliders, Dropdown Presets, Mutes, Alertas)"]
-        OSD["GNOME Native OSD\n(Main.osdWindowManager)"]
-    end
+| Tecla | Ação | Repetição |
+|---|---|---|
+| `NumLock` | Liga/desliga modo áudio (`⚡`); desligado libera o teclado | Nativa |
+| `+` | Volume +1% no canal focado, limitado a 100% | Sim |
+| `-` | Volume −1% no canal focado, limitado a 0% | Sim |
+| `1` | Seleciona AKG K52 e foca saída | Não |
+| `2` | Seleciona SP166 e foca saída | Não |
+| `3` | Alterna foco de volume entre saída e microfone | Não |
+| `4` | Preset compatível 1 do destino ativo | Não |
+| `5` | Preset compatível 2 do destino ativo | Não |
+| `6` | Preset compatível 3 do destino ativo | Não |
+| `0` | Dual-Mute do microfone; indicador vermelho no painel | Não |
+| `.` / `,` | Mute da saída (`KP_Decimal` / `KP_Separator`) | Não |
+| `Enter` | Pânico: saída e microfone; restauração por snapshot independente | Não |
+| `/` | DynamicEqualizer placeholder; somente registra intenção | Não |
+| `*` | Reset diário: preset base, saída 95%, mic 100%, preservando ambos os mutes do mic | Não |
+| `7` | Pausada, no-op silencioso | Não |
+| `8` | Pausada, no-op silencioso | Não |
+| `9` | Pausada, no-op silencioso | Não |
 
-    subgraph CLI ["CLI"]
-        CTL["easyprofilectl\n(Subcomando no binário Go)"]
-    end
+NumLock controla o registro dos outros 16 atalhos. Somente `+` e `-` usam `Meta.KeyBindingFlags.NONE`; demais ações usam `IGNORE_AUTOREPEAT`. `4/5/6` selecionam presets; não são no-op. Não existe Reset em `5`. A vírgula e o ponto representam o mesmo controle decimal em variantes do teclado.
 
-    subgraph Daemon ["easyprofiled (Go User Daemon)"]
-        DBUS["Session D-Bus Server\norg.easyprofile.Daemon"]
-        CTRL["Controlador Serializado & Estado\n(Fila com Prioridade de Pânico, Snapshot 3-Booleans,\nMemória por Porta, Arbitragem de Autoload)"]
-        
-        subgraph Adapters ["Adaptadores Pequenos (Interfaces Focadas)"]
-            PW["PipeWire Adapter\n(pw-dump --monitor, wpctl, pw-cli)"]
-            ALSA["ALSA Mixer Adapter\n(amixer PCH: Auto-Mute Disabled, Headphone/Front)"]
-            EE["EasyEffects Adapter\n(com.github.wwmm.easyeffects + easyeffects -l)"]
-        end
-    end
+## 4. Contrato da extensão e D-Bus
 
-    KB -->|"D-Bus Async Call"| DBUS
-    TB <-->|"D-Bus Call / PropertiesChanged"| DBUS
-    DBUS -->|"Result / Signal"| OSD
-    CTL <-->|"D-Bus Call"| DBUS
+ESM nativo/`gi://`, chamadas assíncronas com Gio.Cancellable, proteção por geração e proprietário do nome D-Bus. `disable()` cancela chamadas, remove timers rastreados, desconecta sinais, remove bindings e destrói/libera atores.
 
-    DBUS --> CTRL
-    CTRL --> PW
-    CTRL --> ALSA
-    CTRL --> EE
-```
+Fila de níveis usa `${channel}-${destId}`. Seleção de destino, preset e Reset invalidam pendências; barreiras aguardam chamadas já enviadas e a confirmação da nova operação antes de aceitar novos níveis. `SetVolumeForDestination(destination, percent)` também valida o destino dentro do worker, impedindo aplicação atrasada na outra saída. Sinais atrasados não apagam um alvo de volume ainda pendente. Feedback imediato é do label de nível; ícones usam o estado publicado e a declaração de privacidade exige readback dos dois alvos. OSD é reservado a erros.
 
-### 3.2 Simplificação Estrutural (Eliminando Overengineering)
+Métodos públicos: GetStatus; SetVolume/SetVolumeAbsolute/SetVolumeForDestination; SetMicVolume/SetMicVolumeAbsolute; ToggleOutputMute/ToggleMicMute/TogglePanic; SelectDestination/ToggleDestination/SelectPreset; ResetDefaults; GetRawMicStreams/MigrateRawMicStream. Sinal StateChanged carrega JSON. Não há Restart, configuração ou ciclo de vida exportado. Reinício explícito pelo menu usa somente systemd.
 
-Atendendo à auditoria técnica:
-1. **Sem proliferar classes ou Ports ornamentais:**
-   - Removemos `SessionStorePort` e `OSDNotifierPort` do núcleo. A extensão GJS exibe o OSD diretamente ao receber a confirmação/sinal D-Bus do daemon.
-   - `OutputDestination` é uma struct de configuração validada com o filtro de presets compatíveis.
-   - O `Controller` concentra de forma coesa o estado desejado, o estado observado e as invariantes de negócio.
-2. **Contratos Técnicos Corrigidos:**
-   - **Proteção na Troca de Rota (`SwitchDestination`):** Como `easyeffects_sink` tem `monitor.channel-volumes = false`, a proteção de silêncio durante a transição de rota atua diretamente **no nó físico (`alsa_output`) e nos pinos ALSA (`amixer`)** (além do ponto validado no Spike EP-002), garantindo silêncio real no hardware antes de comutar `analog-output-headphones` ↔ `analog-output-lineout`.
-   - **Confirmação de Preset no EasyEffects 7.1.6:** Lê a chave `last-used-output-preset` no schema raiz `com.github.wwmm.easyeffects` (e `last-used-input-preset` para o mic), verifica se o booleano global `bypass` é `false` e rejeita colisão de nomes entre direções (`input/` vs `output/`).
-   - **Arbitragem entre Memória de Sessão e Autoload:** Ao trocar para uma porta cujo preset escolhido na sessão difere do preset de autoload (ex: usuário escolheu `"AKG - Rock"`), o controlador observa a transição do autoload após a mudança de rota (ou aguarda a janela de estabilização do EasyEffects) e aplica `"AKG - Rock"`, confirmando via GSettings monitor que o preset final estabilizou em `"AKG - Rock"`.
-   - **Snapshot de Pânico com 3 Estados Independentes:**
-     ```go
-     type PanicSnapshot struct {
-         Active              bool
-         SavedOutMute        bool
-         SavedMicVirtualMute bool
-         SavedMicPhysicalMute bool
-     }
-     ```
-     Se o microfone físico estava mutado e o virtual desmutado antes do pânico, sair do pânico restaura exatamente `Virtual=false, Physical=true`, **jamais desmutando um pino físico que estava mutado antes do pânico**. E se o usuário alterar manualmente o mute de saída ou do mic durante o pânico, o snapshot daquele canal é atualizado in-place.
+Métodos e introspecção são exportados antes de RequestName; o flock já assegura exclusividade durante a inicialização anterior ao anúncio.
 
----
+## 5. Verificação e performance
 
-## 4. Roadmap Reordenado: Spikes e Descoberta Antes do Domínio Definitivo
+Todos os testes usam `EASYPROFILE_TEST_MODE=1` e fakes de áudio. Adaptadores reais bloqueiam execução quando essa variável está presente. Integração usa `dbus-run-session` com configuração sem diretórios de ativação, runtime temporário, GSettings em memória e sentinelas de ferramentas de áudio.
 
-A ordem das 6 Slices foi invertida nas fases iniciais para **provar primeiro os contratos de hardware e Wayland** antes de consolidar o domínio e o daemon:
+1. Formatação, vet, staticcheck e compilação com race.
+2. Auditoria Go AST de subprocessos/arquivos, testes sem os/exec e higiene privada no Git/ambas as listas de exclusão. Não é uma prova formal contra toda forma possível de escrita.
+3. Guards ativos, hashes dos 3 presets, sintaxe/metadata/schema e conteúdo do pacote GJS.
+4. Go com race, regressões de cutover por executáveis falsos e métodos reais da extensão contra atores em memória.
+5. CLI ↔ daemon ↔ proxy GJS real em barramento privado, inclusive cancelamento de chamada pendente e exclusividade de processo. Não carrega a UI no Shell.
+6. Parse de dump capturado <5 ms; status direto durante bloqueio de hardware <5 ms; CLI fake p95 <15 ms (100 amostras, máximo reportado); daemon fake RSS <15 MB; CPU fake ociosa <1% de um núcleo por 60 s. Recursos reais com watchers/subprocessos/GNOME continuam sujeitos a medição acompanhada.
 
-| Slice | Título | Escopo | Toca no Áudio Real? |
-|---|---|---|---|
-| **EP-001** | **Inventário Passivo Read-Only + Spike `NumLock`/Numpad (Sem Áudio)** | 1. CLI de diagnóstico passivo (`easyprofilectl inspect`) que lê o grafo PipeWire real (`monitor.channel-volumes`, escalas, rotas, `Auto-Mute Mode`, schemas GSettings do EasyEffects) sem alterar nada.<br>2. Protótipo mínimo da extensão GJS validando `Clutter.get_default_backend().get_default_seat().get_keymap()`, `IGNORE_AUTOREPEAT`, bloqueio das 17 teclas do Numpad (incluindo `4/6/7/8/9` como No-Op) apenas em um contador/OSD, sem tocar no áudio. | **NÃO** (100% Read-Only no áudio) |
-| **EP-002** | **Spikes Acompanhados de Áudio Real (Volume/Mute Efetivos, Mic Pós-DSP e Troca/Autoload)** | Com acompanhamento humano e restauração imediata (mantendo os 2 guards atuais ativos):<br>1. Testar e definir o ponto exato de controle de volume/mute de saída e do mic pós-DSP diante de `monitor.channel-volumes = false`.<br>2. Validar a troca `SP166 ↔ AKG` protegida por mute físico/ALSA e medir o tempo do autoload do EasyEffects para calibrar a arbitragem de preset de sessão. | **SIM** (Teste pontual acompanhado com restore imediato) |
-| **EP-003** | **Domínio Enxuto, Parser Incremental e Testes de Regressão Baseados nos Spikes** | Implementação do `Controller` com invariantes reais provadas na EP-002 (Snapshot 3-booleans de Pânico, override manual durante pânico, Reset `[5]` preservando mute do mic, arbitragem de preset de sessão vs autoload, parser incremental do `pw-dump` tolerante a sufixo `.3`→`.4`). | **NÃO** (Testes 100% isolados em memória) |
-| **EP-004** | **Daemon D-Bus, Adaptadores Reais/Fakes e Integração Isolada** | Servidor/Cliente D-Bus (`org.easyprofile.Daemon`), fila com prioridade para Pânico, reconciliação dos guards em modo observação, e suíte de integração usando fakes por construção + `GSETTINGS_BACKEND=memory` + `dbus-run-session` + bloqueio explícito de binários de áudio do host nos testes. | **NÃO** (Isolamento hermético) |
-| **EP-005** | **UI Completa na Top Bar (GNOME Shell 46) + Integração Acompanhada** | Top Bar Indicator, botões AKG/Caixas, Dropdown de Presets filtrado por porta, sliders de Volume/Mic, botões de Mute/Pânico/Reset, alerta e migração manual de Stream Cru, integrada ao `easyprofiled`. | **SIM** (Sessão GNOME acompanhada) |
-| **EP-006** | **Homologação de Login, Cutover Autorizado dos Guards e Rollback Verificado** | Validação da trava de sessão gráfica (`XDG_SESSION_ID`), medição real de CPU/RAM/latência para calibrar limites seguros no systemd (sem `CPUQuota=2%` agressivo que cause throttling), script de cutover que salva o estado prévio dos 2 guards antigos e script de rollback testado. | **SIM** (Cutover final autorizado) |
+## 6. Cutover e rollback
+
+Os 2 guards de produção permanecem ativos e os 3 presets imutáveis no desenvolvimento. Esta remediação implementa scripts e testes, sem executar o cutover.
+
+Dry-run é somente leitura, sem build, criação de diretórios ou backup. O snapshot dos guards é JSON validado, criado atomicamente sem substituir um anterior. Estados transitórios/desconhecidos são recusados antes de mutações. Estados suportados: active/inactive e enabled/enabled-runtime/disabled/masked/masked-runtime/static/indirect.
+
+A partir da primeira desativação de guard, ERR/INT/TERM conduzem ao rollback. Saúde exige `protection_state=confirmed`, `last_error=""` e modo de controle, com tentativas limitadas por prazo. SIGKILL ou perda de energia não executam traps; o snapshot preservado permite recuperação explícita.
+
+Rollback remove ativação D-Bus antes de parar/desabilitar o daemon, tenta restaurar ambos os guards mesmo diante de uma falha, verifica exatamente estados positivos/negativos e hashes de presets. Backup ausente/corrompido não autoriza fallback que desmuta/ativa indiscriminadamente.
+
+## 7. Estado de homologação e backlog
+
+EP-006 possui implementação local e regressões herméticas; homologação de login no systemd real, consumo com adaptadores reais, escuta, GNOME Wayland e cutover/rollback reais permanecem pendentes de sessão acompanhada e autorização própria. Relatórios antigos são históricos e não certificam o checkout atual.
+
+DynamicEqualizer permanece placeholder em `/`. DSP dinâmico in-stream e análise de contexto são backlog, sem arquivo de pesquisa ou prova de latência adicional presumidos. Não alterar a cadeia calibrada ou presets originais como parte desta remediação.

@@ -22,7 +22,7 @@ printf '%s\n' "$0" >> "$EASYPROFILE_HOST_COMMAND_LOG"
 exit 97
 BLOCK
 chmod +x "${TEST_DIR}/deny/blocked"
-for tool in wpctl pw-cli pw-dump amixer easyeffects gsettings pactl pw-metadata; do
+for tool in wpctl pw-cli pw-dump amixer easyeffects gsettings dconf pactl pw-metadata; do
     ln -s blocked "${TEST_DIR}/deny/${tool}"
 done
 export PATH="${TEST_DIR}/deny:${PATH}"
@@ -31,6 +31,8 @@ export GSETTINGS_BACKEND=memory
 export GIO_USE_VFS=local
 export XDG_STATE_HOME="${TEST_DIR}/state"
 export XDG_CONFIG_HOME="${TEST_DIR}/config"
+export XDG_RUNTIME_DIR="${TEST_DIR}/runtime"
+mkdir -m 700 "$XDG_RUNTIME_DIR"
 EASYPROFILE_DBUS_INTEGRATION=1 go test -race -v -count=1 ./internal/daemon -run TestDBusIntegration
 CTL="${REPO_ROOT}/bin/easyprofilectl"
 "${CTL}" daemon --fake > "${TEST_DIR}/daemon.log" 2>&1 &
@@ -40,6 +42,11 @@ for ((attempt=0; attempt<100; attempt++)); do
     kill -0 "${DAEMON_PID}" 2>/dev/null || { cat "${TEST_DIR}/daemon.log"; exit 1; }
     sleep 0.03
 done
+if "${CTL}" daemon --fake > "${TEST_DIR}/second-daemon.log" 2>&1; then
+    echo 'Second daemon unexpectedly acquired session lock.' >&2
+    exit 1
+fi
+rg -q 'session lock' "${TEST_DIR}/second-daemon.log"
 gjs -m scripts/test-gjs-proxy.js
 RESULT="$("${CTL}" volume 50)"
 rg -q '50%' <<< "${RESULT}"

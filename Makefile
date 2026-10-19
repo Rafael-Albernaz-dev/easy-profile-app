@@ -10,7 +10,7 @@ vet:
 
 fmt-check:
 	@echo "🔍 Checking go fmt..."
-	@test -z "$$(gofmt -s -l cmd internal)" || (echo "Unformatted files:" && gofmt -s -l cmd internal && exit 1)
+	@test -z "$$(gofmt -s -l cmd internal scripts)" || (echo "Unformatted files:" && gofmt -s -l cmd internal scripts && exit 1)
 
 test:
 	@echo "🧪 Running unit tests (hermetic)..."
@@ -39,6 +39,7 @@ clean:
 
 extension-pack:
 	@mkdir -p dist
+	glib-compile-schemas --strict gnome-extension/easyprofile@gnome-shell/schemas
 	gnome-extensions pack --force --out-dir=dist --extra-source=dbus.js gnome-extension/easyprofile@gnome-shell
 
 bench:

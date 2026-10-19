@@ -1,0 +1,45 @@
+{
+  "head": "0445b9672d29d699727ba57969688b03525baeeb",
+  "services": {
+    "ka1333-input-guard.service": "active",
+    "easyeffects-output-guard.service": "active"
+  },
+  "presets": [
+    {
+      "name": "Preset KA-1333.json",
+      "sha256": "2b31d5fc18d5710026de5e57469a7021f5f67e1aa6f9b4f4e586033f8195e170",
+      "matches_baseline": true
+    },
+    {
+      "name": "AKG K52 - Uso diario aprovado.json",
+      "sha256": "c7af0ffd83f1c7598f477c1789825a321e2a1570309fd5f426b32d39cd57d669",
+      "matches_baseline": true
+    },
+    {
+      "name": "SP166 - Uso diario aprovado.json",
+      "sha256": "7802bfbf95d5fe70d1964e6cfca63adc90a86ed26d78837dd45b2f2a3a142f52",
+      "matches_baseline": true
+    }
+  ],
+  "tracked_private_governance": [],
+  "staged_files": [],
+  "performance_scope": "private D-Bus, fake adapters, non-race binary; no real audio or GNOME QA",
+  "parse_ns_per_op": 3694694,
+  "direct_status_under_hardware_lock": "186ns/op",
+  "dbus_average": "647.611\u00b5s",
+  "fake_process": {
+    "scope": "private D-Bus, fake adapters, non-race binary; no real audio or GNOME QA",
+    "window_seconds": 60.00030512699959,
+    "rss_start_kib": 8508,
+    "rss_end_kib": 8508,
+    "cpu_seconds": 0.0,
+    "cpu_percent_one_core": 0.0,
+    "pid": 1385056,
+    "cli_samples": 100,
+    "cli_p50_ms": 4.096809,
+    "cli_p95_ms": 6.067708,
+    "cli_max_ms": 13.930787,
+    "rss_after_cli_kib": 9432
+  },
+  "production_mutations_performed": false
+}

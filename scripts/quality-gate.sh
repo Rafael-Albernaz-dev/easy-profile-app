@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Quality Gate for EasyProfileApp (Slice EP-001 Proportional)
+# Local remediation gates; audio mutations are blocked and IPC uses a private bus.
 set -euo pipefail
 export EASYPROFILE_TEST_MODE=1
 export GSETTINGS_BACKEND=memory
@@ -9,7 +9,7 @@ REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 cd "${REPO_ROOT}"
 
 echo "=========================================================="
-echo "🛡️  RUNNING EASYPROFILEAPP QUALITY GATES (EP-004 + EP-005 MVP)"
+echo "🛡️  RUNNING EASYPROFILEAPP QUALITY GATES (SECURITY REMEDIATION)"
 echo "=========================================================="
 
 # -----------------------------------------------------------------------------
@@ -17,7 +17,7 @@ echo "=========================================================="
 # -----------------------------------------------------------------------------
 echo ""
 echo "[Gate 1/6] Checking Go formatting, go vet, staticcheck linter, and compilation..."
-UNFORMATTED="$(gofmt -s -l cmd internal)"
+UNFORMATTED="$(gofmt -s -l cmd internal scripts)"
 if [ -n "${UNFORMATTED}" ]; then
     echo "❌ Error: Unformatted Go files detected:"
     echo "${UNFORMATTED}"
@@ -41,26 +41,20 @@ echo "✓ Go formatting, go vet, staticcheck, and compilation passed."
 echo ""
 echo "[Gate 2/6] Auditing forbidden mutation patterns and git hygiene..."
 
-# No shell concatenation (bash -c, sh -c)
-FORBIDDEN_SHELL='(bash[[:space:]]+-c|sh[[:space:]]+-c)'
-if grep -RInE "${FORBIDDEN_SHELL}" "${REPO_ROOT}/cmd" "${REPO_ROOT}/internal"; then
-    echo "❌ Error: Insecure shell execution detected (violates RULES.md §1.4)."
-    exit 1
-fi
-
-# Ensure test mode environment is respected
-if ! grep -q 'TestModeEnv' "${REPO_ROOT}/internal/inspect/runner.go"; then
-    echo "❌ Error: ReadOnlyRunner missing TestModeEnv kill switch."
-    exit 1
-fi
+go run scripts/check-source-safety.go
 
 # Git hygiene: verify private governance files are NOT tracked
-TRACKED_PRIVATE="$(git ls-files | grep -E '^(AGENTS\.md|GEMINI\.md|\.agents/|agents\.md|gemini\.md)' || true)"
+TRACKED_PRIVATE="$(git ls-files | grep -E '(^|/)(AGENTS\.md|GEMINI\.md|agents\.md|gemini\.md|\.agents(/|$))' || true)"
 if [ -n "${TRACKED_PRIVATE}" ]; then
     echo "❌ Error: Private governance files tracked in git:"
     echo "${TRACKED_PRIVATE}"
     exit 1
 fi
+for file in .gitignore "$(git rev-parse --git-path info/exclude)"; do
+    for pattern in AGENTS.md agents.md GEMINI.md gemini.md .agents/; do
+        grep -Fxq "$pattern" "$file"
+    done
+done
 echo "✓ Zero forbidden shell patterns and git hygiene verified."
 
 # -----------------------------------------------------------------------------
@@ -123,6 +117,8 @@ echo "✓ Production guards active, preset hashes intact, and extension schema/s
 echo ""
 echo "[Gate 4/6] Running hermetic unit tests with race detector (EASYPROFILE_TEST_MODE=1)..."
 go test -race -v ./...
+python3 scripts/test-cutover.py
+node scripts/test-extension.cjs
 echo "✓ Hermetic unit tests passed with race detector."
 
 # -----------------------------------------------------------------------------
@@ -131,7 +127,7 @@ echo "✓ Hermetic unit tests passed with race detector."
 echo ""
 echo "[Gate 5/6] Private D-Bus integration (fakes), CLI and read-only inspection..."
 ./scripts/dbus-integration.sh
-INSPECT_OUT="$("${REPO_ROOT}/bin/easyprofilectl" inspect --json --pw-dump-file "${REPO_ROOT}/test/fixtures/pw-dump-live-2026-10-18.json" --offline)"
+INSPECT_OUT="$("${REPO_ROOT}/bin/easyprofilectl" inspect --json --pw-dump-file "${REPO_ROOT}/test/fixtures/pw-dump-live-2026-10-18.json" --preset-dir '' --offline)"
 if ! grep -q '"card_found": true' <<< "${INSPECT_OUT}"; then
     echo "❌ Error: easyprofilectl inspect did not find integrated card in fixture."
     exit 1
@@ -139,19 +135,21 @@ fi
 echo "✓ CLI read-only inspection verified."
 
 # -----------------------------------------------------------------------------
-# GATE 6: Hardware Dump Parse Benchmark Budget (< 10 ms)
+# GATE 6: Captured Dump Parse (<5ms), Fake CLI p95 (<15ms), RSS (<15MB), Idle CPU
 # -----------------------------------------------------------------------------
 echo ""
-echo "[Gate 6/6] Verifying parse performance budget on live dump (< 10 ms)..."
+echo "[Gate 6/6] Parse <5ms; fake CLI p95 <15ms, RSS <15MB, idle CPU <1%/60s..."
 BENCHMARK="$(go test -run '^$' -bench '^BenchmarkParseGraph$' -benchmem ./internal/inspect)"
 printf '%s\n' "${BENCHMARK}"
-awk '/^BenchmarkParseGraph/ { for(i=1;i<=NF;i++) if($i=="ns/op") { found=1; if($(i-1)>=10000000) exit 1 } } END { if(!found) exit 1 }' <<< "${BENCHMARK}"
+awk '/^BenchmarkParseGraph/ { for(i=1;i<=NF;i++) if($i=="ns/op") { found=1; if($(i-1)>=5000000) exit 1 } } END { if(!found) exit 1 }' <<< "${BENCHMARK}"
+./scripts/performance-check.sh
 for unit in ka1333-input-guard.service easyeffects-output-guard.service; do
     [[ "$(systemctl --user is-active "${unit}")" == active ]]
 done
-echo "✓ Parse benchmarks executed and production guards remain active."
+python3 scripts/release-state.py hashes "$BASELINE_FILE"
+echo "✓ Measured fake budgets passed; production guards and presets remain intact. Real-adapter budgets require human QA."
 
 echo ""
 echo "=========================================================="
-echo "🎉 ALL 6 QUALITY GATES PASSED CLEANLY FOR EP-004 + EP-005 MVP!"
+echo "🎉 ALL 6 QUALITY GATES PASSED FOR LOCAL SECURITY REMEDIATION!"
 echo "=========================================================="
