@@ -1,39 +1,17 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <schemalist>
   <schema id="org.gnome.shell.extensions.easyprofile" path="/org/gnome/shell/extensions/easyprofile/">
-    <!-- Volume & Mic Steps (with autorepeat) -->
+    <!-- Volume Steps (with autorepeat) on '+' and '-' -->
     <key name="shortcut-volume-up" type="as">
       <default><![CDATA[['KP_Add']]]></default>
-      <summary>Volume Saída +2%</summary>
+      <summary>Volume +1% (Saída ou Microfone)</summary>
     </key>
     <key name="shortcut-volume-down" type="as">
       <default><![CDATA[['KP_Subtract']]]></default>
-      <summary>Volume Saída -2%</summary>
-    </key>
-    <key name="shortcut-mic-up" type="as">
-      <default><![CDATA[['KP_Multiply']]]></default>
-      <summary>Microfone +2%</summary>
-    </key>
-    <key name="shortcut-mic-down" type="as">
-      <default><![CDATA[['KP_Divide']]]></default>
-      <summary>Microfone -2%</summary>
+      <summary>Volume -1% (Saída ou Microfone)</summary>
     </key>
 
-    <!-- Toggles (IGNORE_AUTOREPEAT) -->
-    <key name="shortcut-mute-mic" type="as">
-      <default><![CDATA[['KP_0']]]></default>
-      <summary>Toggle Dual-Mute Microfone</summary>
-    </key>
-    <key name="shortcut-mute-output" type="as">
-      <default><![CDATA[['KP_Decimal']]]></default>
-      <summary>Toggle Mute Saída</summary>
-    </key>
-    <key name="shortcut-mute-panic" type="as">
-      <default><![CDATA[['KP_Enter']]]></default>
-      <summary>Toggle Mute Total (Pânico)</summary>
-    </key>
-
-    <!-- Destination & Reset (IGNORE_AUTOREPEAT) -->
+    <!-- Destination & Mic Selection (IGNORE_AUTOREPEAT) -->
     <key name="shortcut-dest-akg" type="as">
       <default><![CDATA[['KP_1']]]></default>
       <summary>Selecionar Fone AKG K52</summary>
@@ -42,24 +20,50 @@
       <default><![CDATA[['KP_2']]]></default>
       <summary>Selecionar Caixas SP166</summary>
     </key>
-    <key name="shortcut-dest-toggle" type="as">
+    <key name="shortcut-select-mic" type="as">
       <default><![CDATA[['KP_3']]]></default>
-      <summary>Alternar AKG ↔ Caixas</summary>
+      <summary>Selecionar Microfone para ajuste com +/-</summary>
     </key>
-    <key name="shortcut-reset-base" type="as">
+
+    <!-- Presets 1, 2, 3 (IGNORE_AUTOREPEAT) -->
+    <key name="shortcut-preset-1" type="as">
+      <default><![CDATA[['KP_4']]]></default>
+      <summary>Selecionar Preset 1 do dispositivo ativo</summary>
+    </key>
+    <key name="shortcut-preset-2" type="as">
       <default><![CDATA[['KP_5']]]></default>
-      <summary>Reset Padrão Diário Base</summary>
+      <summary>Selecionar Preset 2 do dispositivo ativo</summary>
+    </key>
+    <key name="shortcut-preset-3" type="as">
+      <default><![CDATA[['KP_6']]]></default>
+      <summary>Selecionar Preset 3 do dispositivo ativo</summary>
+    </key>
+
+    <!-- Toggles & Mutes (IGNORE_AUTOREPEAT) -->
+    <key name="shortcut-mute-mic" type="as">
+      <default><![CDATA[['KP_0']]]></default>
+      <summary>Toggle Dual-Mute Microfone</summary>
+    </key>
+    <key name="shortcut-mute-output" type="as">
+      <default><![CDATA[['KP_Decimal', 'KP_Separator']]]></default>
+      <summary>Toggle Mute Saída</summary>
+    </key>
+    <key name="shortcut-mute-panic" type="as">
+      <default><![CDATA[['KP_Enter']]]></default>
+      <summary>Toggle Mute Total (Pânico)</summary>
+    </key>
+
+    <!-- Daily reset on '*' and DynamicEqualizer placeholder on '/' -->
+    <key name="shortcut-dynamic-eq" type="as">
+      <default><![CDATA[['KP_Divide']]]></default>
+      <summary>Ativar DynamicEqualizer</summary>
+    </key>
+    <key name="shortcut-reset-app" type="as">
+      <default><![CDATA[['KP_Multiply']]]></default>
+      <summary>Resetar Padrão Diário preservando mute do microfone</summary>
     </key>
 
     <!-- Unassigned No-Op Keys when NumLock is ON (Consume & Discard) -->
-    <key name="shortcut-noop-4" type="as">
-      <default><![CDATA[['KP_4']]]></default>
-      <summary>No-Op Silencioso 4</summary>
-    </key>
-    <key name="shortcut-noop-6" type="as">
-      <default><![CDATA[['KP_6']]]></default>
-      <summary>No-Op Silencioso 6</summary>
-    </key>
     <key name="shortcut-noop-7" type="as">
       <default><![CDATA[['KP_7']]]></default>
       <summary>No-Op Silencioso 7</summary>

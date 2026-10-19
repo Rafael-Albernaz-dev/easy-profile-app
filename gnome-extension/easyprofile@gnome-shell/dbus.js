@@ -14,6 +14,11 @@ export const DBusInterface = `
       <arg type="i" direction="in" name="percent"/>
       <arg type="i" direction="out" name="new_volume"/>
     </method>
+    <method name="SetVolumeForDestination">
+      <arg type="s" direction="in" name="destination"/>
+      <arg type="i" direction="in" name="percent"/>
+      <arg type="i" direction="out" name="new_volume"/>
+    </method>
     <method name="SetMicVolume">
       <arg type="i" direction="in" name="delta"/>
       <arg type="i" direction="out" name="new_volume"/>

@@ -18,9 +18,15 @@ export default class EasyProfileExtension extends Extension {
         this._generation = (this._generation ?? 0) + 1;
         this._cancellable = new Gio.Cancellable();
         this._pendingLevels = new Map();
+        this._levelInFlight = new Set();
+        this._levelGeneration = 0;
+        this._retrySources = new Set();
+        this._barriers = [];
+        this._barrierBusy = false;
         this._settings = this.getSettings();
         this._keybindingKeys = [];
         this._status = null;
+        this._targetChannel = 'out';
         this._updatingSliders = false;
 
         // 1. Build Top Bar Indicator & Menu
@@ -39,6 +45,11 @@ export default class EasyProfileExtension extends Extension {
         this._cancellable?.cancel();
         this._cancellable = null;
         this._pendingLevels?.clear();
+        this._levelInFlight?.clear();
+        this._barriers = [];
+        this._barrierBusy = false;
+        for (const source of this._retrySources ?? []) GLib.Source.remove(source);
+        this._retrySources?.clear();
         if (this._ownerSignalId && this._proxy) {
             this._proxy.disconnect(this._ownerSignalId);
             this._ownerSignalId = 0;
@@ -63,6 +74,12 @@ export default class EasyProfileExtension extends Extension {
         }
 
         this._settings = null;
+        this._status = null;
+        for (const field of ['_box', '_icon', '_label', '_muteBadge', '_micMuteBadge', '_menu',
+            '_routeBox', '_btnAKG', '_btnSP166', '_volItem', '_volIcon', '_volSlider',
+            '_btnMuteOut', '_micItem', '_micIcon', '_micSlider', '_btnMuteMic',
+            '_presetsSubMenu', '_warningBanner', '_rawStreamMenu']) this[field] = null;
+        this._keymap = null;
     }
 
     _buildIndicator() {
@@ -82,6 +99,13 @@ export default class EasyProfileExtension extends Extension {
         this._box.add_child(this._icon);
         this._muteBadge = new St.Icon({icon_name: 'audio-volume-muted-symbolic', style_class: 'system-status-icon', visible: false});
         this._box.add_child(this._muteBadge);
+        this._micMuteBadge = new St.Icon({
+            icon_name: 'microphone-sensitivity-muted-symbolic',
+            style_class: 'system-status-icon',
+            style: 'color: #e01b24;',
+            visible: false,
+        });
+        this._box.add_child(this._micMuteBadge);
         this._box.add_child(this._label);
         this._indicator.add_child(this._box);
 
@@ -104,7 +128,13 @@ export default class EasyProfileExtension extends Extension {
             can_focus: true,
             x_expand: true,
         });
-        this._btnAKG.connect('clicked', () => this._callDBus('SelectDestination', ['akg']));
+        this._btnAKG.connect('clicked', () => {
+            this._targetChannel = 'out';
+            if (this._status?.active_destination?.id !== 'akg') {
+                this._callDBus('SelectDestination', ['akg']);
+            }
+            this._updateLabel();
+        });
 
         this._btnSP166 = new St.Button({
             label: '🔊 SP166 (Caixas)',
@@ -112,7 +142,13 @@ export default class EasyProfileExtension extends Extension {
             can_focus: true,
             x_expand: true,
         });
-        this._btnSP166.connect('clicked', () => this._callDBus('SelectDestination', ['sp166']));
+        this._btnSP166.connect('clicked', () => {
+            this._targetChannel = 'out';
+            if (this._status?.active_destination?.id !== 'sp166') {
+                this._callDBus('SelectDestination', ['sp166']);
+            }
+            this._updateLabel();
+        });
 
         this._routeBox.add_child(this._btnAKG);
         this._routeBox.add_child(this._btnSP166);
@@ -169,9 +205,15 @@ export default class EasyProfileExtension extends Extension {
         this._menu.addMenuItem(this._presetsSubMenu);
 
         // Reset Base Button
-        const resetItem = new PopupMenu.PopupMenuItem('Restaurar Padrão Diário [5]');
+        const resetItem = new PopupMenu.PopupMenuItem('Restaurar Padrão Diário [*]');
         resetItem.connect('activate', () => this._callDBus('ResetDefaults', []));
         this._menu.addMenuItem(resetItem);
+
+        // Restart Daemon Button
+        this._menu.addMenuItem(new PopupMenu.PopupSeparatorMenuItem());
+        const restartItem = new PopupMenu.PopupMenuItem('🔄 Reiniciar EasyProfile');
+        restartItem.connect('activate', () => this._restartDaemon());
+        this._menu.addMenuItem(restartItem);
 
         // Raw Mic Stream Warning Banner
         this._warningBanner = new PopupMenu.PopupMenuItem('⚠️ Aplicativo acessando mic físico!', {reactive: false});
@@ -182,6 +224,27 @@ export default class EasyProfileExtension extends Extension {
         this._menu.addMenuItem(this._rawStreamMenu);
     }
 
+    _restartDaemon() {
+        this._invalidateLevels();
+        const generation = this._generation;
+        try {
+            const proc = Gio.Subprocess.new(
+                ['systemctl', '--user', 'restart', 'easyprofiled.service'],
+                Gio.SubprocessFlags.NONE
+            );
+            proc.wait_async(this._cancellable, (process, result) => {
+                try {
+                    process.wait_finish(result);
+                    if (this._enabled && generation === this._generation && !process.get_successful())
+                        this._showOSD('Falha ao reiniciar EasyProfile', 'dialog-error-symbolic');
+                } catch (error) {
+                    if (this._enabled && generation === this._generation)
+                        this._showOSD(error.message, 'dialog-error-symbolic');
+                }
+            });
+        } catch (error) { this._showOSD(error.message, 'dialog-error-symbolic'); }
+    }
+
     _setConnected(connected) {
         if (!this._enabled) return;
         this._menu.box.reactive = connected;
@@ -190,11 +253,13 @@ export default class EasyProfileExtension extends Extension {
         this._btnAKG.reactive = connected;
         this._btnSP166.reactive = connected;
         if (!connected) {
-            this._pendingLevels?.clear();
+            this._invalidateLevels();
+            this._barriers = [];
             this._status = null;
             this._label.set_text('EasyProfile desconectado');
             this._icon.set_icon_name('network-offline-symbolic');
             this._muteBadge.visible = false;
+            this._micMuteBadge.visible = false;
         }
     }
 
@@ -231,12 +296,14 @@ export default class EasyProfileExtension extends Extension {
             if (owner !== this._proxy?.g_name_owner) { done?.(null); return; }
             if (error || !result) {
                 if (retryCount < 3 && this._proxy?.g_name_owner) {
-                    GLib.timeout_add(GLib.PRIORITY_DEFAULT, 200, () => {
+                    const source = GLib.timeout_add(GLib.PRIORITY_DEFAULT, 200, () => {
+                        this._retrySources.delete(source);
                         if (this._enabled && generation === this._generation && this._proxy?.g_name_owner) {
                             this._refreshStatus(done, retryCount + 1);
                         }
                         return GLib.SOURCE_REMOVE;
                     });
+                    this._retrySources.add(source);
                     return;
                 }
                 this._setConnected(false);
@@ -252,18 +319,18 @@ export default class EasyProfileExtension extends Extension {
     _onStateChanged(statusJson) {
         try {
             const s = JSON.parse(statusJson);
+            if (this._status?.active_destination?.id !== s.active_destination.id)
+                this._invalidateLevels();
             this._status = s;
 
             // 1. Update Top Bar Icon & Label
             const isAKG = s.active_destination.id === 'akg';
             let iconName = isAKG ? 'audio-headphones-symbolic' : 'audio-speakers-symbolic';
             this._muteBadge.visible = Boolean(s.observed_output_mute);
+            this._micMuteBadge.visible = Boolean(s.mic_privacy_muted || s.mic_virtual_muted || s.mic_physical_muted);
             this._icon.set_icon_name(iconName);
 
-            const destShort = isAKG ? 'AKG' : 'SP166';
-            const numLockOn = this._keymap ? Boolean(this._keymap.get_num_lock_state()) : false;
-            const modeMarker = numLockOn ? '⚡' : '';
-            this._label.set_text(`${modeMarker}${destShort} ${s.output_volume}%${s.observe_only ? ' (observação)' : ''}`);
+            this._updateLabel();
 
             // 2. Update Route Buttons Styling
             if (isAKG) {
@@ -276,8 +343,8 @@ export default class EasyProfileExtension extends Extension {
 
             // 3. Update Sliders (without re-triggering remote calls)
             this._updatingSliders = true;
-            this._volSlider.value = s.output_volume / 100.0;
-            this._micSlider.value = s.mic_level / 100.0;
+            this._volSlider.value = this._displayLevel('out') / 100.0;
+            this._micSlider.value = this._displayLevel('mic') / 100.0;
             this._updatingSliders = false;
 
             // 4. Update Mute button styles
@@ -326,62 +393,135 @@ export default class EasyProfileExtension extends Extension {
         } catch (error) { console.error(error); }
     }
 
+    _updateLabel() {
+        if (!this._status) return;
+        const isAKG = this._status.active_destination?.id === 'akg';
+        const destShort = isAKG ? 'AKG' : 'SP166';
+        const numLockOn = this._keymap ? Boolean(this._keymap.get_num_lock_state()) : false;
+        const modeMarker = numLockOn ? '⚡' : '';
+        const observeMarker = this._status.observe_only ? ' (observação)' : '';
+        if (numLockOn && this._targetChannel === 'mic') {
+            this._label.set_text(`${modeMarker}MIC ${this._displayLevel('mic')}%${observeMarker}`);
+        } else {
+            this._label.set_text(`${modeMarker}${destShort} ${this._displayLevel('out')}%${observeMarker}`);
+        }
+    }
+
+    _selectPresetByIndex(index) {
+        const presets = this._status?.available_presets;
+        if (presets && presets.length > index) {
+            const target = presets[index];
+            if (target && target !== this._status?.active_preset) {
+                this._callDBus('SelectPreset', [target]);
+            }
+        }
+    }
+
     _callDBus(method, args, done = null) {
+        if (['SelectDestination', 'ToggleDestination', 'ResetDefaults', 'SelectPreset'].includes(method)) {
+            this._invalidateLevels();
+            this._barriers.push({method, args, done});
+            this._drainBarriers();
+            return;
+        }
+        if (method === 'TogglePanic') this._invalidateLevels();
+        this._invokeDBus(method, args, error => {
+            done?.(error);
+            if (!error) this._refreshStatus();
+        });
+    }
+
+    _invokeDBus(method, args, done) {
         if (!this._enabled || !this._proxy?.g_name_owner) {
-            this._showOSD('Daemon EasyProfile desconectado', 'dialog-error-symbolic');
-            done?.();
+            if (this._enabled) this._showOSD('Daemon EasyProfile desconectado', 'dialog-error-symbolic');
+            done?.(new Error('daemon disconnected'));
             return;
         }
         const generation = this._generation;
         const owner = this._proxy.g_name_owner;
-        this._proxy[`${method}Remote`](...args, (_res, error) => {
-            if (!this._enabled || generation !== this._generation) return;
-            if (owner !== this._proxy?.g_name_owner) { done?.(); return; }
+        try { this._proxy[`${method}Remote`](...args, (_res, error) => {
+            if (!this._enabled || generation !== this._generation || owner !== this._proxy?.g_name_owner) {
+                done?.(new Error('obsolete D-Bus call'));
+                return;
+            }
             if (error) {
                 const msg = error.message.replace(/^GDBus\.Error:[a-zA-Z0-9_.]+: /, '');
                 this._showOSD(`Falha: ${msg}`, 'dialog-error-symbolic');
-                done?.();
+                done?.(error);
                 return;
             }
-            this._refreshStatus(s => {
-                if (!s) { done?.(); return; }
-                if (method.includes('Volume')) {
-                    const mic = method.includes('Mic');
-                    this._showOSDGauge(mic ? 'Nível Microfone' : 'Volume Saída', mic ? s.mic_level : s.output_volume,
-                        mic ? 'audio-input-microphone-symbolic' : 'audio-volume-high-symbolic');
-                } else {
-                    let text = `${s.active_destination.display_name} · ${s.active_preset}`;
-                    if (method === 'TogglePanic') text = s.last_error ? 'Proteção incompleta' : (s.panic_active ? 'Pânico confirmado' : 'Snapshot restaurado');
-                    if (method === 'ToggleMicMute') text = s.mic_privacy_muted ? 'Dual-Mute confirmado' : 'Microfone: mute alterado';
-                    if (method === 'ToggleOutputMute') text = s.observed_output_mute ? 'Saída mutada' : 'Saída desmutada';
-                    if (method === 'ResetDefaults') text = 'Padrão diário restaurado';
-                    if (method === 'MigrateRawMicStream') text = 'Migração ao microfone processado confirmada';
-                    this._showOSD(text, 'audio-headphones-symbolic');
-                }
-                done?.();
+            done?.(null);
+        }, this._cancellable); } catch (error) {
+            this._showOSD(error.message, 'dialog-error-symbolic');
+            done?.(error);
+        }
+    }
+
+    _invalidateLevels() {
+        this._levelGeneration++;
+        this._pendingLevels?.clear();
+    }
+
+    _drainBarriers() {
+        if (!this._enabled || this._barrierBusy || this._levelInFlight.size || !this._barriers.length) return;
+        const generation = this._generation;
+        const {method, args, done} = this._barriers.shift();
+        this._barrierBusy = true;
+        this._invokeDBus(method, args, error => {
+            if (!this._enabled || generation !== this._generation) return;
+            // Keep input gated until the route/reset readback has arrived.
+            this._refreshStatus(() => {
+                if (!this._enabled || generation !== this._generation) return;
+                this._barrierBusy = false;
+                done?.(error);
+                this._drainBarriers();
             });
-        }, this._cancellable);
+        });
+    }
+
+    _levelKey(channel) { return `${channel}-${this._status?.active_destination?.id}`; }
+
+    _displayLevel(channel) {
+        return this._pendingLevels.get(this._levelKey(channel))?.value ??
+            (channel === 'mic' ? this._status.mic_level : this._status.output_volume);
     }
 
     // One in-flight level request per channel; sliders replace the pending target,
     // repeated keys accumulate locally instead of flooding the hardware queue.
     _queueLevel(channel, value, absolute) {
-        let pending = this._pendingLevels.get(channel);
+        if (!this._enabled || !this._status || this._barrierBusy || this._barriers.length) return;
+        const key = this._levelKey(channel);
+        const destination = this._status.active_destination.id;
+        const generation = this._generation;
+        const levelGeneration = this._levelGeneration;
+        let pending = this._pendingLevels.get(key);
         if (!pending) {
             pending = {value: channel === 'mic' ? (this._status?.mic_level ?? 100) : (this._status?.output_volume ?? 95), busy: false, dirty: false};
-            this._pendingLevels.set(channel, pending);
+            this._pendingLevels.set(key, pending);
         }
         pending.value = Math.max(0, Math.min(100, absolute ? value : pending.value + value));
         pending.dirty = true;
+
+        this._updateLabel();
+
         const flush = () => {
-            if (!this._enabled || this._pendingLevels.get(channel) !== pending || pending.busy || !pending.dirty) return;
+            if (!this._enabled || generation !== this._generation || levelGeneration !== this._levelGeneration ||
+                this._pendingLevels.get(key) !== pending || pending.busy || !pending.dirty) return;
             pending.dirty = false;
             pending.busy = true;
-            this._callDBus(channel === 'mic' ? 'SetMicVolumeAbsolute' : 'SetVolumeAbsolute', [pending.value], () => {
+            this._levelInFlight.add(pending);
+            const method = channel === 'mic' ? 'SetMicVolumeAbsolute' : 'SetVolumeForDestination';
+            const args = channel === 'mic' ? [pending.value] : [destination, pending.value];
+            this._callDBus(method, args, error => {
                 pending.busy = false;
-                if (this._pendingLevels.get(channel) !== pending) return;
-                if (pending.dirty) flush();
-                else this._pendingLevels.delete(channel);
+                this._levelInFlight.delete(pending);
+                if (!this._enabled || generation !== this._generation) return;
+                if (this._pendingLevels.get(key) === pending) {
+                    if (!error && pending.dirty) flush();
+                    else this._pendingLevels.delete(key);
+                    if (error) this._updateLabel();
+                }
+                this._drainBarriers();
             });
         };
         flush();
@@ -410,15 +550,11 @@ export default class EasyProfileExtension extends Extension {
         if (numLockOn) {
             this._registerKeybindings();
         } else {
+            this._targetChannel = 'out';
             this._unregisterKeybindings();
         }
 
-        if (this._status) {
-            const isAKG = this._status.active_destination.id === 'akg';
-            const destShort = isAKG ? 'AKG' : 'SP166';
-            const modeMarker = numLockOn ? '⚡' : '';
-            this._label.set_text(`${modeMarker}${destShort} ${this._status.output_volume}%`);
-        }
+        this._updateLabel();
     }
 
     _registerKeybindings() {
@@ -429,50 +565,81 @@ export default class EasyProfileExtension extends Extension {
         const allowRepeat = Meta.KeyBindingFlags.NONE;
 
         const bindings = [
-            // Volume ±2% (Repeatable)
+            // 1) TECLA "+": aumenta o volume em 1% (saída ou microfone)
             {name: 'shortcut-volume-up', flags: allowRepeat, handler: () => {
-                this._queueLevel('out', 2, false);
+                this._queueLevel(this._targetChannel, 1, false);
             }},
+
+            // 2) TECLA "-": diminui o volume em 1% (saída ou microfone)
             {name: 'shortcut-volume-down', flags: allowRepeat, handler: () => {
-                this._queueLevel('out', -2, false);
+                this._queueLevel(this._targetChannel, -1, false);
             }},
 
-            // Mic ±2% (Repeatable)
-            {name: 'shortcut-mic-up', flags: allowRepeat, handler: () => {
-                this._queueLevel('mic', 2, false);
-            }},
-            {name: 'shortcut-mic-down', flags: allowRepeat, handler: () => {
-                this._queueLevel('mic', -2, false);
+            // 3) TECLA "1": seleciona o AKG K52 (se já ativo, no-op; restaura foco para saída)
+            {name: 'shortcut-dest-akg', flags: noRepeat, handler: () => {
+                this._targetChannel = 'out';
+                if (this._status?.active_destination?.id !== 'akg') {
+                    this._callDBus('SelectDestination', ['akg']);
+                }
+                this._updateLabel();
             }},
 
-            // Mutes (Ignore Autorepeat)
+            // 4) TECLA "2": seleciona o SP166 (se já ativo, no-op; restaura foco para saída)
+            {name: 'shortcut-dest-sp166', flags: noRepeat, handler: () => {
+                this._targetChannel = 'out';
+                if (this._status?.active_destination?.id !== 'sp166') {
+                    this._callDBus('SelectDestination', ['sp166']);
+                }
+                this._updateLabel();
+            }},
+
+            // 8) TECLA "3": seleciona o microfone para ajuste com "+" ou "-"
+            {name: 'shortcut-select-mic', flags: noRepeat, handler: () => {
+                this._targetChannel = (this._targetChannel === 'mic') ? 'out' : 'mic';
+                this._updateLabel();
+            }},
+
+            // 10) TECLA "4": primeiro preset do dispositivo de saída ativo
+            {name: 'shortcut-preset-1', flags: noRepeat, handler: () => {
+                this._selectPresetByIndex(0);
+            }},
+
+            // 11) TECLA "5": segundo preset do dispositivo de saída ativo
+            {name: 'shortcut-preset-2', flags: noRepeat, handler: () => {
+                this._selectPresetByIndex(1);
+            }},
+
+            // 12) TECLA "6": terceiro preset do dispositivo de saída ativo
+            {name: 'shortcut-preset-3', flags: noRepeat, handler: () => {
+                this._selectPresetByIndex(2);
+            }},
+
+            // 5) TECLA "0": muta/desmuta microfone (Dual-Mute)
             {name: 'shortcut-mute-mic', flags: noRepeat, handler: () => {
                 this._callDBus('ToggleMicMute', []);
             }},
+
+            // 6) TECLA ",": muta/desmuta saída
             {name: 'shortcut-mute-output', flags: noRepeat, handler: () => {
                 this._callDBus('ToggleOutputMute', []);
             }},
+
+            // 7) TECLA "ENTER": muta/desmuta saída e entrada (Pânico / Mute All)
             {name: 'shortcut-mute-panic', flags: noRepeat, handler: () => {
                 this._callDBus('TogglePanic', []);
             }},
 
-            // Destination & Reset (Ignore Autorepeat)
-            {name: 'shortcut-dest-akg', flags: noRepeat, handler: () => {
-                this._callDBus('SelectDestination', ['akg']);
+            // 13) TECLA "/": ativa DynamicEqualizer (placeholder)
+            {name: 'shortcut-dynamic-eq', flags: noRepeat, handler: () => {
+                console.log('EasyProfile: DynamicEqualizer ativado (placeholder)');
             }},
-            {name: 'shortcut-dest-sp166', flags: noRepeat, handler: () => {
-                this._callDBus('SelectDestination', ['sp166']);
-            }},
-            {name: 'shortcut-dest-toggle', flags: noRepeat, handler: () => {
-                this._callDBus('ToggleDestination', []);
-            }},
-            {name: 'shortcut-reset-base', flags: noRepeat, handler: () => {
+
+            // '*' restores daily levels/preset while preserving mic mutes; no restart.
+            {name: 'shortcut-reset-app', flags: noRepeat, handler: () => {
                 this._callDBus('ResetDefaults', []);
             }},
 
-            // No-Op Keys (Silent consumption to prevent number typing)
-            {name: 'shortcut-noop-4', flags: noRepeat, handler: () => {}},
-            {name: 'shortcut-noop-6', flags: noRepeat, handler: () => {}},
+            // 15) TECLAS "7, 8 e 9": pausadas / No-Op silencioso
             {name: 'shortcut-noop-7', flags: noRepeat, handler: () => {}},
             {name: 'shortcut-noop-8', flags: noRepeat, handler: () => {}},
             {name: 'shortcut-noop-9', flags: noRepeat, handler: () => {}},
@@ -480,7 +647,9 @@ export default class EasyProfileExtension extends Extension {
 
 
         for (const b of bindings) {
-            const action = Main.wm.addKeybinding(b.name, this._settings, b.flags, mode, b.handler);
+            const action = Main.wm.addKeybinding(b.name, this._settings, b.flags, mode, () => {
+                if (this._enabled && this._keymap?.get_num_lock_state()) b.handler();
+            });
             if (action === Meta.KeyBindingAction.NONE)
                 console.error(`EasyProfile: atalho indisponível ${b.name}`);
             else this._keybindingKeys.push(b.name);
@@ -506,16 +675,4 @@ export default class EasyProfileExtension extends Extension {
         } catch (_e) {}
     }
 
-    _showOSDGauge(label, level, iconName) {
-        try {
-            const clamped = Math.max(0, Math.min(100, level));
-            Main.osdWindowManager.show(
-                -1,
-                Gio.ThemedIcon.new(iconName || 'audio-volume-high-symbolic'),
-                `${label}: ${clamped}%`,
-                clamped / 100.0,
-                1
-            );
-        } catch (_e) {}
-    }
 }
