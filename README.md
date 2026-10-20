@@ -15,6 +15,7 @@ The calibrated setup uses AKG K52 front headphones, SP166 rear speakers and the 
 - Raw microphone captures are reported. Migration is explicit per application, rejects ambiguity and confirms processed links.
 - Status reads use an immutable published snapshot, independently of slow hardware operations. UI level requests carry a destination, and route/reset barriers discard pending levels and wait for calls already sent.
 - Microphone monitoring (post-DSP sidetone) creates dedicated PipeWire links from `easyeffects_source` to `easyeffects_sink`. A blue headset panel icon indicates active monitoring, and enabling monitoring automatically un-mutes the microphone if muted.
+- Temporary whole-output sharing replaces one active call capture's microphone with the selected physical output monitor. The menu switch and `share on|off|toggle` restore the previous capture target on stop. Sharing includes notifications and participants' voices; it cannot run together with mic monitoring. Mic mute, panic, Reset and destination selection stop it. See [behavior and human QA](docs/OUTPUT_SHARING.md).
 
 Automated tests use in-memory audio adapters with `EASYPROFILE_TEST_MODE=1`. No test may control real audio. Production guards and the three calibrated preset files remain untouched during development. Passing local gates does not certify physical routing, sound quality or GNOME Shell behavior.
 
@@ -41,6 +42,59 @@ Automated tests use in-memory audio adapters with `EASYPROFILE_TEST_MODE=1`. No 
 | `9` | Reserved, silent no-op | No |
 
 NumLock is monitored natively; the other 16 bindings are registered only in audio mode. Only `+`/`-` allow autorepeat. Routine actions produce no OSD; real errors do. Volume labels update locally while confirmation is pending. Icons/mute claims use daemon state rather than assuming hardware success. Restart is available from the menu through systemd only; `*` does not restart the daemon.
+
+## Calibrated EasyEffects output presets (SP166 & AKG K52)
+
+Ten listening-tested output presets for EasyEffects 7.1.6 are versioned in [`presets/output/`](presets/output/), covering five distinct acoustic modes for both Multi/Multilaser SP166 2.1 speakers and AKG K52 closed-back headphones:
+
+| Mode | SP166 Preset | AKG K52 Preset | Intended Use & Acoustic Target |
+|---|---|---|---|
+| **Padrão** | [`SP166 - Padrão.json`](presets/output/SP166%20-%20Padrão.json) | [`AKG K52 - Padrão.json`](presets/output/AKG%20K52%20-%20Padrão.json) | Daily reference; speech, meetings, classes, and general music |
+| **Bass** | [`SP166 - Bass.json`](presets/output/SP166%20-%20Bass.json) | [`AKG K52 - Bass.json`](presets/output/AKG%20K52%20-%20Bass.json) | Low-end impact and weight; electronic, trance, techno, hardstyle, hardtekk |
+| **Cinema** | [`SP166 - Cinema.json`](presets/output/SP166%20-%20Cinema.json) | [`AKG K52 - Cinema.json`](presets/output/AKG%20K52%20-%20Cinema.json) | Dialogue clarity and dynamic contrast between speech and action |
+| **Jazz** | [`SP166 - Jazz.json`](presets/output/SP166%20-%20Jazz.json) | [`AKG K52 - Jazz.json`](presets/output/AKG%20K52%20-%20Jazz.json) | Open acoustic soundstage, piano, brass, and cymbal air |
+| **Rock** | [`SP166 - Rock.json`](presets/output/SP166%20-%20Rock.json) | [`AKG K52 - Rock.json`](presets/output/AKG%20K52%20-%20Rock.json) | Body, guitar/vocal presence, and drum transient punch |
+
+All presets and metadata are indexed in [`presets/manifest.json`](presets/manifest.json).
+
+### DSP chains and calibration
+
+- **SP166 vs. AKG K52 gain staging**: AKG K52 presets apply a calibrated `-2.5 dB` input gain on `equalizer#1` (or `equalizer#0` for Padrão) to match the front-panel headphone mixer ceiling (97%) and headphone sensitivity, whereas SP166 uses `0.0 dB` input gain.
+- **Padrão (IIR)**: Minimalist equalizer-only stage without a limiter. SP166 uses 2 parametric bands (250 Hz -1 dB, 2500 Hz +1.5 dB, Q=0.8); AKG preserves its neutral daily reference curve (1791 Hz, gain 0 dB, Q=1.55).
+- **Bass (Calf Bass Enhancer)**: `equalizer#1 → bass_enhancer#0 → limiter#0`. Harmonic generation (`amount=10`, `floor=40 Hz`, `scope=100`, `harmonics=4`) on top of the clean daily EQ base. Limiter uses Herm Thin (`threshold -1 dB`, `alr true`, `lookahead 5 ms`, `attack 1 ms`, `release 5 ms`).
+- **Cinema (Dialogue Clarity adaptation)**: `filter#0 (18 Hz high-pass IIR x4) → multiband_compressor#0 (splits 120/250/3500/8000 Hz, bands 0–4 active, wet -6 dB parallel, upward compression on band 2) → equalizer#1 → compressor#1 (wideband downward, threshold -22 dB, ratio 1.7, sidechain 150–6000 Hz RMS) → limiter#0 (Herm Thin, threshold -1.5 dB, 8x oversampling Full x8(3L), 24-bit dithering)`.
+- **Jazz (GentleDynamics acoustic adaptation)**: `filter#0 (18 Hz high-pass FIR x6) → multiband_compressor#0 (8 active bands, upward/downward dynamic control) → equalizer#1 (4 bands: 250 Hz -1 dB, 400 Hz -1.5 dB, 2500 Hz +2.5 dB, 7000 Hz +2.5 dB) → limiter#0 (Herm Thin, threshold -2 dB, output gain -0.6 dB, 8x oversampling, 24-bit dithering)`.
+- **Rock**: `equalizer#1 (4 bands: 110 Hz low-shelf +4 dB, 350 Hz -3 dB, 1600 Hz +3.5 dB, 7000 Hz high-shelf +2.5 dB) → compressor#0 (downward, threshold -16 dB, ratio 1.3, attack 30 ms, release 100 ms) → limiter#0 (Herm Thin, threshold -1 dB, alr true)`. Listening benchmarked against Pantera's *Walk*.
+
+### EasyProfileApp integration
+
+In EasyProfileApp destinations (`config.json`), set `Padrão` as `base_preset` and list the remaining presets alphabetically (`Padrão → Bass → Cinema → Jazz → Rock`):
+- Keypad `4`: Instantly selects the base preset (`SP166 - Padrão` or `AKG K52 - Padrão`).
+- Keypad `5` / `6`: Circularly cycles previous / next compatible presets.
+- Jazz and Rock are also directly selectable from the GNOME Shell tray menu or CLI.
+
+### Preset checksums & installation
+
+| File | Bytes | SHA-256 |
+|---|---|---|
+| `presets/output/SP166 - Padrão.json` | 1953 | `7802bfbf95d5fe70d1964e6cfca63adc90a86ed26d78837dd45b2f2a3a142f52` |
+| `presets/output/SP166 - Bass.json` | 2919 | `65c54cf505aca620350df5a2fbbdcb6004451efc5455ab48a201fde4114deb6b` |
+| `presets/output/SP166 - Cinema.json` | 13583 | `4e8a8591effe1728b986a636f30562be33fdf56d8d493f4cd2114ddb6cfc216c` |
+| `presets/output/SP166 - Jazz.json` | 14134 | `56f5ff4f92000c56394927f9b9a88d395fce148ae34912e0344201cf7d1c5796` |
+| `presets/output/SP166 - Rock.json` | 5054 | `04a1b45f5878866e7bbaa59494483ef093d530e397251b88b39de9a5506b2767` |
+| `presets/output/AKG K52 - Padrão.json` | 1228 | `c7af0ffd83f1c7598f477c1789825a321e2a1570309fd5f426b32d39cd57d669` |
+| `presets/output/AKG K52 - Bass.json` | 2920 | `5fc282599e8de5e0497db1c92a035c66928f2ebb7a2221cbf06ce5a19db70226` |
+| `presets/output/AKG K52 - Cinema.json` | 13584 | `7f3b2d17c789101668655465691337d3236f1bce1ccbf88672f4bd8230bad858` |
+| `presets/output/AKG K52 - Jazz.json` | 14135 | `6dfe0e71b2c6aac38e17ecd3ae20d76eb7fef228063825c1303756a9ecaeb732` |
+| `presets/output/AKG K52 - Rock.json` | 5055 | `e4b0f067afa5957338fc7cd1d4a128c62291027577b64fdac043afa293d14b5c` |
+
+Presets can be copied to `~/.config/easyeffects/output/` (native package) or imported via the EasyEffects interface.
+
+### Sources & Attributions
+
+- **Cinema & Jazz dynamics**: Adapted from [droidwayin/GentleDynamics](https://github.com/droidwayin/GentleDynamics) (`GentleDynamics Dialogue Clarity Engine.json` and `GentleDynamics.json`, GPL-3.0), customized with personal parametric EQ curves.
+- **Bass**: Harmonic generation inspired by exploration of [Rabcor/Heavy-Bass-EE](https://github.com/Rabcor/Heavy-Bass-EE) (Unlicense), tuned without crystallizer or multiband artifacts.
+- **Padrão & Rock**: Personal listening curves tailored for the SP166 physical acoustic setup and AKG K52 closed-back headphones.
 
 ## Architecture
 
@@ -95,13 +149,15 @@ easyprofilectl mute mic
 easyprofilectl mute out
 easyprofilectl panic
 easyprofilectl listen toggle
+easyprofilectl share on
+easyprofilectl share off
 easyprofilectl route akg
 easyprofilectl route sp166
 easyprofilectl preset list
 easyprofilectl preset next
 easyprofilectl preset prev
 easyprofilectl preset base
-easyprofilectl preset "SP166 - 20 Jazz Aberto - Aprovado"
+easyprofilectl preset "SP166 - Jazz"
 easyprofilectl reset
 ```
 

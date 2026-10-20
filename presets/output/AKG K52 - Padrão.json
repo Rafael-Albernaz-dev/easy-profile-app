@@ -1,0 +1,45 @@
+{
+    "output": {
+        "plugins_order": [
+            "equalizer#0"
+        ],
+        "blocklist": [],
+        "equalizer#0": {
+            "pitch-left": 0.0,
+            "split-channels": false,
+            "num-bands": 1,
+            "mode": "IIR",
+            "balance": 0.0,
+            "input-gain": -2.5,
+            "output-gain": 0.0,
+            "pitch-right": 0.0,
+            "bypass": false,
+            "left": {
+                "band0": {
+                    "type": "Bell",
+                    "mode": "APO (DR)",
+                    "slope": "x1",
+                    "solo": false,
+                    "mute": false,
+                    "frequency": 1791.0,
+                    "gain": 0.0,
+                    "q": 1.55,
+                    "width": 4.0
+                }
+            },
+            "right": {
+                "band0": {
+                    "type": "Bell",
+                    "mode": "APO (DR)",
+                    "slope": "x1",
+                    "solo": false,
+                    "mute": false,
+                    "frequency": 1791.0,
+                    "gain": 0.0,
+                    "q": 1.55,
+                    "width": 4.0
+                }
+            }
+        }
+    }
+}

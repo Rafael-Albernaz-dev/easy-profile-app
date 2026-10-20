@@ -1,0 +1,154 @@
+{
+  "schema_version": 1,
+  "snapshot_date": "2026-10-19",
+  "format": "EasyEffects output presets JSON",
+  "tested_easyeffects": "7.1.6",
+  "file_count": 10,
+  "presets": [
+    {
+      "name": "SP166 - Padrão",
+      "device": "SP166",
+      "mode": "Padrão",
+      "file": "presets/output/SP166 - Padrão.json",
+      "sha256": "7802bfbf95d5fe70d1964e6cfca63adc90a86ed26d78837dd45b2f2a3a142f52",
+      "bytes": 1953,
+      "plugins_order": [
+        "equalizer#1"
+      ],
+      "owner_listening_status": "approved"
+    },
+    {
+      "name": "SP166 - Bass",
+      "device": "SP166",
+      "mode": "Bass",
+      "file": "presets/output/SP166 - Bass.json",
+      "sha256": "65c54cf505aca620350df5a2fbbdcb6004451efc5455ab48a201fde4114deb6b",
+      "bytes": 2919,
+      "plugins_order": [
+        "equalizer#1",
+        "bass_enhancer#0",
+        "limiter#0"
+      ],
+      "owner_listening_status": "approved"
+    },
+    {
+      "name": "SP166 - Cinema",
+      "device": "SP166",
+      "mode": "Cinema",
+      "file": "presets/output/SP166 - Cinema.json",
+      "sha256": "4e8a8591effe1728b986a636f30562be33fdf56d8d493f4cd2114ddb6cfc216c",
+      "bytes": 13583,
+      "plugins_order": [
+        "filter#0",
+        "multiband_compressor#0",
+        "equalizer#1",
+        "compressor#1",
+        "limiter#0"
+      ],
+      "owner_listening_status": "approved"
+    },
+    {
+      "name": "SP166 - Jazz",
+      "device": "SP166",
+      "mode": "Jazz",
+      "file": "presets/output/SP166 - Jazz.json",
+      "sha256": "56f5ff4f92000c56394927f9b9a88d395fce148ae34912e0344201cf7d1c5796",
+      "bytes": 14134,
+      "plugins_order": [
+        "filter#0",
+        "multiband_compressor#0",
+        "equalizer#1",
+        "limiter#0"
+      ],
+      "owner_listening_status": "approved"
+    },
+    {
+      "name": "SP166 - Rock",
+      "device": "SP166",
+      "mode": "Rock",
+      "file": "presets/output/SP166 - Rock.json",
+      "sha256": "04a1b45f5878866e7bbaa59494483ef093d530e397251b88b39de9a5506b2767",
+      "bytes": 5054,
+      "plugins_order": [
+        "equalizer#1",
+        "compressor#0",
+        "limiter#0"
+      ],
+      "owner_listening_status": "approved"
+    },
+    {
+      "name": "AKG K52 - Padrão",
+      "device": "AKG K52",
+      "mode": "Padrão",
+      "file": "presets/output/AKG K52 - Padrão.json",
+      "sha256": "c7af0ffd83f1c7598f477c1789825a321e2a1570309fd5f426b32d39cd57d669",
+      "bytes": 1228,
+      "plugins_order": [
+        "equalizer#0"
+      ],
+      "owner_listening_status": "approved"
+    },
+    {
+      "name": "AKG K52 - Bass",
+      "device": "AKG K52",
+      "mode": "Bass",
+      "file": "presets/output/AKG K52 - Bass.json",
+      "sha256": "5fc282599e8de5e0497db1c92a035c66928f2ebb7a2221cbf06ce5a19db70226",
+      "bytes": 2920,
+      "plugins_order": [
+        "equalizer#1",
+        "bass_enhancer#0",
+        "limiter#0"
+      ],
+      "owner_listening_status": "approved"
+    },
+    {
+      "name": "AKG K52 - Cinema",
+      "device": "AKG K52",
+      "mode": "Cinema",
+      "file": "presets/output/AKG K52 - Cinema.json",
+      "sha256": "7f3b2d17c789101668655465691337d3236f1bce1ccbf88672f4bd8230bad858",
+      "bytes": 13584,
+      "plugins_order": [
+        "filter#0",
+        "multiband_compressor#0",
+        "equalizer#1",
+        "compressor#1",
+        "limiter#0"
+      ],
+      "owner_listening_status": "approved"
+    },
+    {
+      "name": "AKG K52 - Jazz",
+      "device": "AKG K52",
+      "mode": "Jazz",
+      "file": "presets/output/AKG K52 - Jazz.json",
+      "sha256": "6dfe0e71b2c6aac38e17ecd3ae20d76eb7fef228063825c1303756a9ecaeb732",
+      "bytes": 14135,
+      "plugins_order": [
+        "filter#0",
+        "multiband_compressor#0",
+        "equalizer#1",
+        "limiter#0"
+      ],
+      "owner_listening_status": "approved"
+    },
+    {
+      "name": "AKG K52 - Rock",
+      "device": "AKG K52",
+      "mode": "Rock",
+      "file": "presets/output/AKG K52 - Rock.json",
+      "sha256": "e4b0f067afa5957338fc7cd1d4a128c62291027577b64fdac043afa293d14b5c",
+      "bytes": 5055,
+      "plugins_order": [
+        "equalizer#1",
+        "compressor#0",
+        "limiter#0"
+      ],
+      "owner_listening_status": "approved"
+    }
+  ],
+  "new_preset_names": "device - one word",
+  "autoeq_applied": false,
+  "full_parameter_source": "embedded JSON; values in summary tables are rounded for display"
+}
