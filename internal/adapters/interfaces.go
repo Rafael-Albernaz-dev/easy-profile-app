@@ -4,6 +4,11 @@ import (
 	"context"
 )
 
+type OutputSharingState struct {
+	Active         bool
+	RestorePending bool
+}
+
 // GraphState is a fresh readback of the endpoints needed to keep the DSP chain connected.
 type GraphState struct {
 	PhysicalMicrophone   string
@@ -20,6 +25,9 @@ type DSPDevices struct {
 
 // PipeWirePort defines the audio graph mutation and inspection capabilities required by the daemon.
 type PipeWirePort interface {
+	StartOutputSharing(ctx context.Context, sink string) error
+	StopOutputSharing(ctx context.Context) error
+	ReadOutputSharing(ctx context.Context) (OutputSharingState, error)
 	ReadGraphState(ctx context.Context, sink, source, physicalSink, micPrefix string) (GraphState, error)
 	EnsureDefaultSink(ctx context.Context, sink string) error
 	EnsureDefaultSource(ctx context.Context, source string) error

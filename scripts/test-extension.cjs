@@ -22,6 +22,7 @@ const context = {
 };
 vm.createContext(context); vm.runInContext(source, context);
 const actor = () => ({visible: false, value: 0, text: '', set_text(value) { this.text = value; },
+    setToggleState(value) { this.state = value; }, label: {set_text(value) {this.text=value;}},
     set_icon_name() {}, add_style_pseudo_class() {}, remove_style_pseudo_class() {},
     menu: {removeAll() {}, addMenuItem() {}}});
 const status = (id = 'akg', output = 50) => ({active_destination: {id}, output_volume: output, mic_level: 100,
@@ -32,11 +33,11 @@ function extension() {
         _levelInFlight: new Set(), _retrySources: new Set(), _barriers: [], _barrierBusy: false,
         _status: status(), _targetChannel: 'out', _keybindingKeys: [], _keymap: {get_num_lock_state: () => true},
         _cancellable: {cancel() {}}, _settings: {}});
-    for (const key of ['_label', '_icon', '_muteBadge', '_micMuteBadge', '_listenBadge', '_btnAKG', '_btnSP166',
+    for (const key of ['_label', '_icon', '_muteBadge', '_micMuteBadge', '_listenBadge', '_shareItem', '_btnAKG', '_btnSP166',
         '_volSlider', '_micSlider', '_btnMuteOut', '_btnMuteMic', '_presetsSubMenu', '_warningBanner', '_rawStreamMenu']) e[key] = actor();
     const calls = [];
     const proxy = {g_name_owner: ':fake.1'};
-    for (const method of ['SetVolumeForDestination', 'SetMicVolumeAbsolute', 'SelectDestination', 'ResetDefaults', 'SelectPreset']) {
+    for (const method of ['SetVolumeForDestination', 'SetMicVolumeAbsolute', 'SelectDestination', 'ResetDefaults', 'SelectPreset', 'SetOutputSharing']) {
         proxy[`${method}Remote`] = (...args) => {
             const cancellable = args.pop(); const callback = args.pop();
             assert.equal(cancellable, e._cancellable);
@@ -128,4 +129,25 @@ function extension() {
     bindings.get('shortcut-mute-panic').handler(); assert.equal(actions.length, 6);
     e._unregisterKeybindings(); assert.equal(bindings.size, 0);
 }
-console.log('Extension regressions passed: destination/reset barriers, late signals/errors, lifecycle, NumLock and repeat flags.');
+{
+    const {e, calls} = extension();
+    e._setOutputSharing(true);
+    assert.equal(e._shareItem.reactive, false);
+    assert.equal(calls[0].method, 'SetOutputSharing');
+    assert.deepEqual(Array.from(calls[0].args), [true]);
+    const sharing = {...status(), output_sharing: true};
+    e._onStateChanged(JSON.stringify(sharing));
+    assert.equal(e._shareItem.state, true);
+    assert.match(e._label.text, /COMPARTILHANDO/);
+    calls[0].callback([true], null);
+    assert.equal(e._shareItem.reactive, true);
+    e._setOutputSharing(false);
+    e._generation++;
+    e._shareItem.reactive = false;
+    calls[1].callback(null, new Error('obsolete'));
+    assert.equal(e._shareItem.reactive, false, 'late call must not modify new actors');
+    e._onStateChanged(JSON.stringify({...status(), output_sharing_restore_pending:true}));
+    assert.equal(e._shareItem.state, true, 'pending restoration must allow retrying OFF');
+    assert.match(e._label.text, /RESTAURAR ENTRADA/);
+}
+console.log('Extension regressions passed: sharing/readback/lifecycle, destination/reset barriers, late signals/errors, NumLock and repeat flags.');

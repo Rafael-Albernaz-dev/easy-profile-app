@@ -13,6 +13,18 @@ let signalId = 0;
 let signalSeen = false;
 let cancelSource = 0;
 const pendingCall = new Gio.Cancellable();
+function verifySharing(client, done) {
+    client.SetOutputSharingRemote(true, (reply, error) => {
+        if (error || reply[0] !== true) { printerr(error ?? 'invalid sharing reply'); loop.quit(); return; }
+        client.GetStatusRemote(([json], statusError) => {
+            if (statusError || !JSON.parse(json).output_sharing) { printerr(statusError ?? 'sharing readback missing'); loop.quit(); return; }
+            client.ToggleOutputSharingRemote((offReply, offError) => {
+                if (offError || offReply[0] !== false) { printerr(offError ?? 'sharing did not stop'); loop.quit(); return; }
+                done();
+            }, cancellable);
+        }, cancellable);
+    }, cancellable);
+}
 const timeout = GLib.timeout_add_seconds(GLib.PRIORITY_DEFAULT, 10, () => {
     printerr('GJS proxy timed out');
     cancellable.cancel();
@@ -25,7 +37,7 @@ const proxy = new DaemonProxy(Gio.DBus.session, 'org.easyprofile.Daemon', '/org/
         const state = JSON.parse(json);
         if (state.mic_level === 86) signalSeen = true;
     });
-    client.SetMicVolumeAbsoluteRemote(86, (result, callError) => {
+    verifySharing(client, () => client.SetMicVolumeAbsoluteRemote(86, (result, callError) => {
         if (callError || result[0] !== 86) { printerr(callError ?? 'invalid mic reply'); loop.quit(); return; }
         client.GetStatusRemote(([json], statusError) => {
             if (statusError) { printerr(statusError); loop.quit(); return; }
@@ -45,7 +57,7 @@ const proxy = new DaemonProxy(Gio.DBus.session, 'org.easyprofile.Daemon', '/org/
                 return GLib.SOURCE_REMOVE;
             });
         }, cancellable);
-    }, cancellable);
+    }, cancellable));
 }, cancellable);
 loop.run();
 cancellable.cancel();
@@ -54,5 +66,5 @@ if (cancelSource) GLib.Source.remove(cancelSource);
 if (signalId) proxy.disconnectSignal(signalId);
 // Remove the timeout if it has not already fired.
 if (exitCode === 0) GLib.source_remove(timeout);
-if (exitCode === 0) print('Shared GJS proxy: signed-int method, pending-call cancellation and StateChanged passed.');
+if (exitCode === 0) print('Shared GJS proxy: output sharing, signed-int method, pending-call cancellation and StateChanged passed.');
 System.exit(exitCode);

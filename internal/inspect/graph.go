@@ -93,13 +93,20 @@ type LinkInfo struct {
 // Graph is a parsed, immutable view of one `pw-dump` snapshot.
 // IDs are ephemeral: valid only for this snapshot.
 type Graph struct {
-	Nodes   map[int]*NodeInfo
-	Devices map[int]*DeviceInfo
-	Links   []LinkInfo
+	CaptureTargets map[int]TargetMetadata
+	Nodes          map[int]*NodeInfo
+	Devices        map[int]*DeviceInfo
+	Links          []LinkInfo
 	// Defaults holds subject-0 keys of the "default" metadata (e.g. default.audio.sink).
 	Defaults map[string]string
 	// RestoreTargets holds "route-settings" restore entries that pin a stream class to a node name.
 	RestoreTargets map[string]string
+}
+
+// TargetMetadata preserves the exact per-stream target for temporary routing.
+type TargetMetadata struct {
+	Value string
+	Type  string
 }
 
 // --- raw pw-dump shapes (only the fields we need) ---
@@ -146,6 +153,7 @@ type rawRoute struct {
 }
 
 type rawMetaEntry struct {
+	Type    string          `json:"type"`
 	Subject int             `json:"subject"`
 	Key     string          `json:"key"`
 	Value   json.RawMessage `json:"value"`
@@ -169,6 +177,7 @@ func ParseGraph(data []byte) (*Graph, error) {
 		return nil, errors.New("pw-dump returned empty object list")
 	}
 	g := &Graph{
+		CaptureTargets: map[int]TargetMetadata{},
 		Nodes:          map[int]*NodeInfo{},
 		Devices:        map[int]*DeviceInfo{},
 		Defaults:       map[string]string{},
@@ -275,6 +284,13 @@ func (g *Graph) absorbMetadata(name string, entries []rawMetaEntry) {
 	for _, e := range entries {
 		switch name {
 		case "default":
+			if e.Subject != 0 && e.Key == "target.object" {
+				var value string
+				if json.Unmarshal(e.Value, &value) != nil {
+					value = string(e.Value)
+				}
+				g.CaptureTargets[e.Subject] = TargetMetadata{Value: value, Type: e.Type}
+			}
 			if e.Subject == 0 {
 				if v := metadataName(e.Value); v != "" {
 					g.Defaults[e.Key] = v

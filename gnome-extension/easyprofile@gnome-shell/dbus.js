@@ -53,6 +53,13 @@ export const DBusInterface = `
     <method name="ToggleMicMonitoring">
       <arg type="b" direction="out" name="active"/>
     </method>
+    <method name="ToggleOutputSharing">
+      <arg type="b" direction="out" name="active"/>
+    </method>
+    <method name="SetOutputSharing">
+      <arg type="b" direction="in" name="enabled"/>
+      <arg type="b" direction="out" name="active"/>
+    </method>
     <method name="SetMicMonitoring">
       <arg type="b" direction="in" name="enabled"/>
       <arg type="b" direction="out" name="active"/>

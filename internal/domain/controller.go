@@ -27,6 +27,7 @@ type AudioController struct {
 	mic                  *Microphone
 	panicState           PanicSnapshot
 	micMonitoring        bool
+	outputSharing        bool // transient; never restored automatically from disk
 	store                *SessionStore
 	sessionID            string
 	persistenceErr       error

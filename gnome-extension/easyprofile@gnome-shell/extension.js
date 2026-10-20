@@ -77,7 +77,7 @@ export default class EasyProfileExtension extends Extension {
         this._status = null;
         for (const field of ['_box', '_icon', '_label', '_muteBadge', '_micMuteBadge', '_listenBadge', '_menu',
             '_routeBox', '_btnAKG', '_btnSP166', '_volItem', '_volIcon', '_volSlider',
-            '_btnMuteOut', '_micItem', '_micIcon', '_micSlider', '_btnMuteMic', '_micListenItem',
+            '_btnMuteOut', '_micItem', '_micIcon', '_micSlider', '_btnMuteMic', '_micListenItem', '_shareItem',
             '_presetsSubMenu', '_warningBanner', '_rawStreamMenu']) this[field] = null;
         this._keymap = null;
     }
@@ -217,6 +217,13 @@ export default class EasyProfileExtension extends Extension {
         });
         this._menu.addMenuItem(this._micListenItem);
 
+        this._shareItem = new PopupMenu.PopupSwitchMenuItem('Compartilhar toda a saída na chamada', false);
+        this._shareItem.connect('toggled', (_item, enabled) => {
+            if (this._updatingShare) return;
+            this._setOutputSharing(enabled);
+        });
+        this._menu.addMenuItem(this._shareItem);
+
         this._menu.addMenuItem(new PopupMenu.PopupSeparatorMenuItem());
 
         // Presets Submenu
@@ -278,6 +285,7 @@ export default class EasyProfileExtension extends Extension {
         if (this._btnAKG) this._btnAKG.reactive = connected;
         if (this._btnSP166) this._btnSP166.reactive = connected;
         if (this._presetsSubMenu) this._presetsSubMenu.reactive = connected;
+        if (this._shareItem) this._shareItem.reactive = connected;
         if (this._restartItem?.label?.set_text) {
             this._restartItem.label.set_text(connected ? '🔄 Reiniciar EasyProfile' : '⚡ Forçar Ativação do EasyProfile');
         }
@@ -418,6 +426,14 @@ export default class EasyProfileExtension extends Extension {
                 this._micListenItem.setToggleState(Boolean(s.mic_monitoring));
                 this._updatingListen = false;
             }
+            if (this._shareItem) {
+                this._updatingShare = true;
+                this._shareItem.setToggleState(Boolean(s.output_sharing || s.output_sharing_restore_pending));
+                this._shareItem.label.set_text(s.output_sharing_restore_pending
+                    ? 'Compartilhamento: concluir restauração da entrada'
+                    : 'Compartilhar toda a saída na chamada');
+                this._updatingShare = false;
+            }
 
             // 5. Update Presets Submenu
             this._presetsSubMenu.menu.removeAll();
@@ -452,6 +468,16 @@ export default class EasyProfileExtension extends Extension {
         } catch (error) { console.error(error); }
     }
 
+    _setOutputSharing(enabled) {
+        const generation = this._generation;
+        this._shareItem.reactive = false;
+        this._callDBus('SetOutputSharing', [enabled], () => {
+            if (!this._enabled || generation !== this._generation || !this._shareItem) return;
+            this._shareItem.reactive = Boolean(this._proxy?.g_name_owner);
+            this._refreshStatus();
+        });
+    }
+
     _updateLabel() {
         if (!this._status) return;
         const isAKG = this._status.active_destination?.id === 'akg';
@@ -459,10 +485,12 @@ export default class EasyProfileExtension extends Extension {
         const numLockOn = this._keymap ? Boolean(this._keymap.get_num_lock_state()) : false;
         const modeMarker = numLockOn ? '⚡' : '';
         const observeMarker = this._status.observe_only ? ' (observação)' : '';
+        const shareMarker = this._status.output_sharing ? ' • COMPARTILHANDO' :
+            (this._status.output_sharing_restore_pending ? ' • RESTAURAR ENTRADA' : '');
         if (numLockOn && this._targetChannel === 'mic') {
-            this._label.set_text(`${modeMarker}MIC ${this._displayLevel('mic')}%${observeMarker}`);
+            this._label.set_text(`${modeMarker}MIC ${this._displayLevel('mic')}%${observeMarker}${shareMarker}`);
         } else {
-            this._label.set_text(`${modeMarker}${destShort} ${this._displayLevel('out')}%${observeMarker}`);
+            this._label.set_text(`${modeMarker}${destShort} ${this._displayLevel('out')}%${observeMarker}${shareMarker}`);
         }
     }
 

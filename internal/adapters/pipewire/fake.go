@@ -27,6 +27,36 @@ type FakePipeWire struct {
 	GraphErr              error
 	DefaultErr            error
 	MicMonitoring         bool
+	Sharing               adapters.OutputSharingState
+	StartSharingErr       error
+	StopSharingErr        error
+	ReadSharingErr        error
+}
+
+func (f *FakePipeWire) StartOutputSharing(ctx context.Context, sink string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.Calls = append(f.Calls, "StartOutputSharing:"+sink)
+	if f.StartSharingErr != nil {
+		return f.StartSharingErr
+	}
+	f.Sharing = adapters.OutputSharingState{Active: true}
+	return nil
+}
+
+func (f *FakePipeWire) StopOutputSharing(ctx context.Context) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.Calls = append(f.Calls, "StopOutputSharing")
+	f.Sharing.Active = false
+	f.Sharing.RestorePending = f.StopSharingErr != nil
+	return f.StopSharingErr
+}
+
+func (f *FakePipeWire) ReadOutputSharing(ctx context.Context) (adapters.OutputSharingState, error) {
+	f.mu.RLock()
+	defer f.mu.RUnlock()
+	return f.Sharing, f.ReadSharingErr
 }
 
 var _ adapters.PipeWirePort = (*FakePipeWire)(nil)

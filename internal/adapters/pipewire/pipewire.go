@@ -26,9 +26,11 @@ var (
 )
 
 // RealPipeWire implements adapters.PipeWirePort using PipeWire tools (pw-cli, wpctl).
-// Adheres strictly to RULES.md §1.4: Direct exec.Command execution, timeouts on all calls,
+// Adheres strictly to docs/RULES.md §1.4: Direct exec.Command execution, timeouts on all calls,
 // and hermetic execution blocks when EASYPROFILE_TEST_MODE=1.
 type RealPipeWire struct {
+	sharing   *sharingSession // accessed only by the daemon's serialized worker
+	sharingIO *sharingIO
 	micPrefix string
 	timeout   time.Duration
 

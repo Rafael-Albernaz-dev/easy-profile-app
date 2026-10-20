@@ -58,6 +58,8 @@ func run(args []string, stdout, stderr io.Writer) int {
 		return runReset(args[1:], stdout, stderr)
 	case "listen", "monitor":
 		return runListen(args[1:], stdout, stderr)
+	case "share":
+		return runShare(args[1:], stdout, stderr)
 	case "inspect":
 		return runInspect(args[1:], stdout, stderr)
 	case "version", "--version":
@@ -87,6 +89,7 @@ commands:
   preset [list|next|prev|base|<name>] list, cycle or apply a compatible equalizer preset
   reset                   restore daily base preset, output 95%, mic 100% (preserves mic mute)
   listen [on|off|toggle]  toggle or set mic monitoring (listening with DSP filters)
+  share [on|off|toggle]   replace an active call's microphone with the whole output
   inspect                 read-only inspection of PipeWire, ALSA, and EasyEffects
   version                 print version`)
 }
@@ -346,6 +349,7 @@ func runStatus(args []string, stdout, stderr io.Writer) int {
 		monStr = "ENABLED (listening with filters)"
 	}
 	fmt.Fprintf(stdout, "  Mic Listen:   %s\n", monStr)
+	fmt.Fprintf(stdout, "  Output Share: %t (restoration pending: %t)\n", s.OutputSharing, s.OutputSharingRestorePending)
 	fmt.Fprintf(stdout, "  Panic Mute:   %s\n", panicStr)
 	fmt.Fprintf(stdout, "  Preset:       %s\n", s.ActivePreset)
 	if len(s.AvailablePresets) > 0 {

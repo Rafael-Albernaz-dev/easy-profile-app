@@ -22,7 +22,7 @@ printf '%s\n' "$0" >> "$EASYPROFILE_HOST_COMMAND_LOG"
 exit 97
 BLOCK
 chmod +x "${TEST_DIR}/deny/blocked"
-for tool in wpctl pw-cli pw-dump amixer easyeffects gsettings dconf pactl pw-metadata; do
+for tool in wpctl pw-cli pw-dump pw-loopback pw-link amixer easyeffects gsettings dconf pactl pw-metadata; do
     ln -s blocked "${TEST_DIR}/deny/${tool}"
 done
 export PATH="${TEST_DIR}/deny:${PATH}"
@@ -70,6 +70,15 @@ rg -q '"mic_monitoring":true' <<< "${RESULT}"
 "${CTL}" listen off
 RESULT="$("${CTL}" status --json)"
 rg -q '"mic_monitoring":false' <<< "${RESULT}"
+"${CTL}" share on
+RESULT="$("${CTL}" status --json)"
+rg -q '"output_sharing":true' <<< "${RESULT}"
+"${CTL}" share toggle
+RESULT="$("${CTL}" status --json)"
+rg -q '"output_sharing":false' <<< "${RESULT}"
+"${CTL}" share on
+"${CTL}" share off
+if "${CTL}" share invalid >/dev/null 2>&1; then exit 1; fi
 "${CTL}" route sp166
 RESULT="$("${CTL}" preset list)"
 rg -q 'SP166 - Uso diario aprovado' <<< "${RESULT}"
