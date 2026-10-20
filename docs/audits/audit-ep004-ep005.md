@@ -10,7 +10,7 @@ Este parecer aprova a engenharia e as provas automatizadas locais descritas abai
 
 ## Escopo e independência
 
-O auditor leu a governança na ordem solicitada: `AGENTS.md`, `.agents/easyprofile/CONTEXT.md`, `DECISIONS.md`, `ROADMAP.md`, `RULES.md` e `ARCHITECTURE_AND_REQUIREMENTS.md`. Revisou `internal/domain/`, `internal/adapters/`, `internal/daemon/`, `cmd/easyprofilectl/`, `gnome-extension/`, o empacotamento da extensão e os scripts de qualidade/integração.
+O auditor leu a governança na ordem solicitada: `AGENTS.md`, `.agents/easyprofile/CONTEXT.md`, `DECISIONS.md`, `ROADMAP.md`, `docs/RULES.md` e `ARCHITECTURE_AND_REQUIREMENTS.md`. Revisou `internal/domain/`, `internal/adapters/`, `internal/daemon/`, `cmd/easyprofilectl/`, `gnome-extension/`, o empacotamento da extensão e os scripts de qualidade/integração.
 
 A revisão de código e a execução de ferramentas foram independentes da implementação. O executor recebeu os achados e implementou as correções; o auditor não modificou código funcional. A única escrita documental do auditor é este parecer. Não houve stage, commit, push, instalação de ferramentas/extensão ou invocação mutável do áudio real pelo auditor.
 
@@ -22,7 +22,7 @@ Os adaptadores reais usam argumentos explícitos e contextos com prazo; recusam 
 
 O exame de concorrência incluiu locks, filas, canais de resposta, encerramento do worker, watchers de subprocessos e callbacks da extensão. O código revisado cancela e recolhe processos observadores, interrompe timers, fecha conexões próprias da CLI e invalida callbacks após disable ou mudança do proprietário D-Bus. Os testes com `-race` não detectaram races nos caminhos executados; isso não prova ausência de races em todos os caminhos possíveis.
 
-A configuração de hardware/calibração foi separada em `config.example.json`, com validação de destinos, pinos opostos, limites e identificação da rota inicial pelos nomes configurados. O daemon de desenvolvimento usa memória e adota mutes observados ao iniciar, evitando reaplicar uma política automática de desmute de login ainda não homologada.
+A configuração de hardware/calibração foi separada em `configs/config.example.json`, com validação de destinos, pinos opostos, limites e identificação da rota inicial pelos nomes configurados. O daemon de desenvolvimento usa memória e adota mutes observados ao iniciar, evitando reaplicar uma política automática de desmute de login ainda não homologada.
 
 ### Achados corrigidos e reexaminados
 
@@ -90,7 +90,7 @@ A baseline contém caminhos com `~`; `sha256sum -c` diretamente não expande ess
 
 ## Conformidade e pendências de aceite
 
-O código final examinado atende aos contratos locais de IPC único, domínio, execução segura, fakes, proteção de teste e preservação do setup estabelecidos no `RULES.md`. Os mecanismos previstos para EP-004/EP-005 no DRS estão implementados e têm as provas locais listadas. Não é possível declarar conformidade operacional integral sem a execução acompanhada dos adaptadores e da extensão no desktop real.
+O código final examinado atende aos contratos locais de IPC único, domínio, execução segura, fakes, proteção de teste e preservação do setup estabelecidos no `docs/RULES.md`. Os mecanismos previstos para EP-004/EP-005 no DRS estão implementados e têm as provas locais listadas. Não é possível declarar conformidade operacional integral sem a execução acompanhada dos adaptadores e da extensão no desktop real.
 
 O teste GJS executa o mesmo módulo de proxy importado pela extensão, sem simular as classes Gio. Isso comprova esse componente de runtime e seu contrato D-Bus. O empacotamento também foi corrigido para associar o schema e expandir os sliders. Permanecem fora da prova automatizada: captura efetiva das teclas no GNOME 46/Wayland, ausência de vazamento de caracteres, OSD/sliders/menu, reconexão real da extensão, atenuação audível, silêncio da porta inativa, Dual-Mute físico, autoload sob os guards e migração efetiva de uma aplicação real. A extensão não foi instalada nem ativada durante esta auditoria. O usuário adiou o QA humano; não houve acionamento real de volume/mute/rota para concluir esta entrega.
 

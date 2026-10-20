@@ -41,7 +41,7 @@ echo "✓ Go formatting, go vet, staticcheck, and compilation passed."
 echo ""
 echo "[Gate 2/6] Auditing forbidden mutation patterns and git hygiene..."
 
-go run scripts/check-source-safety.go
+go run ./cmd/easyprofile-source-audit
 
 # Git hygiene: verify private governance files are NOT tracked
 TRACKED_PRIVATE="$(git ls-files | grep -E '(^|/)(AGENTS\.md|GEMINI\.md|agents\.md|gemini\.md|\.agents(/|$))' || true)"

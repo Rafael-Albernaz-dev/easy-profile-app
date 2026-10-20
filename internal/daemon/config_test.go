@@ -7,7 +7,7 @@ import (
 )
 
 func TestConfigCalibratedExampleAndUnsafeOverrides(t *testing.T) {
-	cfg, err := LoadConfig("../../config.example.json")
+	cfg, err := LoadConfig("../../configs/config.example.json")
 	if err != nil {
 		t.Fatal(err)
 	}

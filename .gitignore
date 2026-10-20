@@ -36,3 +36,17 @@ coverage.html
 *.pid
 *.lock
 /tmp/
+
+# Local architecture and requirements
+/docs/ARCHITECTURE_AND_REQUIREMENTS.md
+
+# Generated local evidence (reports remain versioned)
+/docs/evidence/
+
+# Compiled GNOME schemas; source XML remains versioned
+**/gschemas.compiled
+
+# Python tooling caches
+__pycache__/
+*.py[cod]
+.pytest_cache/

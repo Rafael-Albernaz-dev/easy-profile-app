@@ -80,7 +80,7 @@ Um ajuste iniciado no fone não é reenviado à caixa após trocar de destino. R
 
 Teste dos métodos reais da extensão contra atores/proxy em memória cobre barreiras, sinais atrasados, falhas, callbacks após disable, limpeza de timers, NumLock e repetição. Integração usa o proxy Gio real no bus privado e cancela uma chamada pendente. Cancelar o cliente não desfaz uma operação já aceita pelo servidor; as barreiras tratam esse limite.
 
-A UI não foi instalada/carregada no Shell real nesta entrega. O roteiro humano está no [handoff atualizado](EP-004-EP-005-HANDOFF.md).
+A UI não foi instalada/carregada no Shell real nesta entrega. O roteiro humano está no [handoff atualizado](../handoffs/EP-004-EP-005-HANDOFF.md).
 
 ## Rastreabilidade dos 16 achados
 
@@ -119,8 +119,8 @@ A UI não foi instalada/carregada no Shell real nesta entrega. O roteiro humano 
 
 **Integridade anterior/posterior:** ambos os guards permanecem `active`; os três presets têm SHA-256 idênticos à baseline. Governança privada continua ignorada e não rastreada; nenhum arquivo foi colocado em stage. O teste CLI preexistente foi preservado byte a byte. Não houve commit/push, instalação ou mudança no áudio de produção.
 
-- [Log dos seis gates](evidence/remediation-2026-10-19-quality-gate.log).
-- [Manifesto de integridade e métricas](evidence/remediation-2026-10-19-integrity.json).
-- [Roteiro de homologação humana](EP-004-EP-005-HANDOFF.md#6-roteiro-humano-futuro--não-executado-nesta-remediação).
+- [Log dos seis gates](../evidence/remediation-2026-10-19-quality-gate.log).
+- [Manifesto de integridade e métricas](../evidence/remediation-2026-10-19-integrity.json).
+- [Roteiro de homologação humana](../handoffs/EP-004-EP-005-HANDOFF.md#6-roteiro-humano-futuro--não-executado-nesta-remediação).
 
 Esses resultados encerram a remediação automatizada local. Provas acústicas, recursos reais, instalação da UI no Shell e cutover/rollback físicos permanecem no roteiro acompanhado; não foram substituídos por simulação.

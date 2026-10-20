@@ -32,7 +32,7 @@ python3 "${SCRIPT_DIR}/release-state.py" save "$BACKUP_FILE" "$KA_ACTIVE" "$KA_E
 mkdir -p "${HOME}/.local/bin" "${HOME}/.config/easyprofile" "${HOME}/.config/systemd/user"
 install -m 0755 "${REPO_ROOT}/bin/easyprofilectl" "${HOME}/.local/bin/easyprofilectl"
 if [[ ! -f "${HOME}/.config/easyprofile/config.json" ]]; then
-    install -m 0644 "${REPO_ROOT}/config.example.json" "${HOME}/.config/easyprofile/config.json"
+    install -m 0644 "${REPO_ROOT}/configs/config.example.json" "${HOME}/.config/easyprofile/config.json"
 fi
 install -m 0644 "${REPO_ROOT}/systemd/user/easyprofiled.service" "${HOME}/.config/systemd/user/easyprofiled.service"
 EXT_SRC="${REPO_ROOT}/gnome-extension/easyprofile@gnome-shell"

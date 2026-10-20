@@ -64,7 +64,7 @@ make build extension-pack
 # Inspeção passiva não inicia daemon:
 bin/easyprofilectl inspect --json
 # Somente se não houver outro daemon com o lock da sessão:
-bin/easyprofilectl daemon --observe --config config.example.json
+bin/easyprofilectl daemon --observe --config configs/config.example.json
 ```
 
 Não lançar um segundo daemon para disputar um processo humano. Em modo observe o código não repara hardware nem consome a política de login. Para produção, confirmar disponibilidade de `XDG_SESSION_ID` ou `SESSION_MANAGER` no ambiente do serviço; sockets estáveis de Wayland/D-Bus não autorizam desmute.

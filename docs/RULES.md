@@ -58,6 +58,6 @@ O script `./scripts/quality-gate.sh` executa verificações proporcionais aos co
 
 ## 5. Contratos atualizados pela remediação de 19/10/2026
 
-O contrato vigente das 17 teclas está em `ARCHITECTURE_AND_REQUIREMENTS.md`: Reset em `*`, presets em `4/5/6`, foco de mic em `3` e passos de 1%. Reinício somente via systemd, sem método D-Bus de ciclo de vida. Observação explícita não consome a política de login nem repara áudio.
+O contrato vigente das 17 teclas está em `docs/ARCHITECTURE_AND_REQUIREMENTS.md`: Reset em `*`, presets em `4/5/6`, foco de mic em `3` e passos de 1%. Reinício somente via systemd, sem método D-Bus de ciclo de vida. Observação explícita não consome a política de login nem repara áudio.
 
 Marcador de login e snapshot de áudio são arquivos distintos, atômicos e privados. Estado inválido/ilegível não autoriza desmute; no mesmo login, snapshot ausente também não autoriza reaplicar ganhos padrão. O flock precede qualquer inicialização de hardware. Cutover e homologação real permanecem pendentes até autorização própria; traps não prometem recuperação automática de SIGKILL/perda de energia.

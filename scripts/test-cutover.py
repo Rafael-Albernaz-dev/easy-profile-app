@@ -55,9 +55,8 @@ class CutoverTests(unittest.TestCase):
         self.root = Path(self.temp.name)
         self.repo, self.home, self.tools = (self.root / p for p in ('repo', 'home', 'tools'))
         self.home.mkdir(); self.tools.mkdir()
-        for name in ('scripts', 'systemd', 'gnome-extension'):
+        for name in ('scripts', 'systemd', 'gnome-extension', 'configs'):
             shutil.copytree(REPO/name, self.repo/name)
-        shutil.copy(REPO/'config.example.json', self.repo)
         (self.repo/'bin').mkdir(); (self.repo/'bin/easyprofilectl').write_text(FAKE)
         (self.repo/'bin/easyprofilectl').chmod(0o755)
         for tool in ('systemctl', 'make', 'gnome-extensions', 'glib-compile-schemas', 'sleep'):

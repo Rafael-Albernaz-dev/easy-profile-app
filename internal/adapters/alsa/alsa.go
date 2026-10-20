@@ -18,7 +18,7 @@ var (
 )
 
 // RealAlsa controls ALSA mixer settings on physical cards via amixer.
-// Strictly obeys RULES.md §1.4 (zero shell concatenation, timeouts, test mode guard).
+// Strictly obeys docs/RULES.md §1.4 (zero shell concatenation, timeouts, test mode guard).
 type RealAlsa struct {
 	timeout time.Duration
 }
