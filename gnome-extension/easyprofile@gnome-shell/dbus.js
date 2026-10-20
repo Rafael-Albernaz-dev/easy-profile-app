@@ -56,6 +56,8 @@ export const DBusInterface = `
     <method name="ToggleOutputSharing">
       <arg type="b" direction="out" name="active"/>
     </method>
+    <method name="ToggleOutputBoost"><arg type="b" direction="out" name="active"/></method>
+    <method name="SetOutputBoost"><arg type="b" direction="in" name="enabled"/><arg type="b" direction="out" name="active"/></method>
     <method name="SetOutputSharing">
       <arg type="b" direction="in" name="enabled"/>
       <arg type="b" direction="out" name="active"/>

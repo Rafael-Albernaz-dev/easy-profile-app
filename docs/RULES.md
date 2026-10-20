@@ -61,3 +61,17 @@ O script `./scripts/quality-gate.sh` executa verificações proporcionais aos co
 O contrato vigente das 17 teclas está em `docs/ARCHITECTURE_AND_REQUIREMENTS.md`: Reset em `*`, presets em `4/5/6`, foco de mic em `3` e passos de 1%. Reinício somente via systemd, sem método D-Bus de ciclo de vida. Observação explícita não consome a política de login nem repara áudio.
 
 Marcador de login e snapshot de áudio são arquivos distintos, atômicos e privados. Estado inválido/ilegível não autoriza desmute; no mesmo login, snapshot ausente também não autoriza reaplicar ganhos padrão. O flock precede qualquer inicialização de hardware. Cutover e homologação real permanecem pendentes até autorização própria; traps não prometem recuperação automática de SIGKILL/perda de energia.
+
+## 6. Contrato autorizado de compartilhamento e Boost
+
+Numpad `8` alterna o compartilhamento de toda a saída em uma captura ativa.
+Numpad `9` alterna Boost somente da saída: libera até 112% lógicos (~+2,95 dB),
+sem elevar o nível atual. Microfone e volumes reais PipeWire/ALSA continuam
+limitados a 100% e aos tetos físicos calibrados. O ganho extra fica antes de um
+limitador LSP temporário ao final do preset, nunca nos arquivos de presets.
+Desligar limita valores acima de 100%; Reset e reinício desligam Boost.
+Mudança de preset/saída preserva o modo e o volume de cada saída durante a execução.
+Instância reservada `limiter#99`: recusar presets que a utilizem; falhas de
+configuração/readback mantêm a saída física mutada. Testes usam fakes e D-Bus
+privado; qualidade acústica e CPU do DSP real exigem homologação humana.
+Contrato completo: `docs/features/OUTPUT_BOOST.md`.

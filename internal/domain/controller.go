@@ -27,6 +27,7 @@ type AudioController struct {
 	mic                   *Microphone
 	panicState            PanicSnapshot
 	micMonitoring         bool
+	outputBoost           bool // transient; extra gain is never persisted
 	outputSharing         bool // transient; never restored automatically from disk
 	store                 *SessionStore
 	sessionID             string
@@ -173,6 +174,7 @@ func (c *AudioController) persist() {
 		Ports:             make(map[DestinationID]PortSessionState, len(c.portMemory)),
 	}
 	for id, state := range c.portMemory {
+		state.VirtualVolume = min(state.VirtualVolume, 100)
 		session.Ports[id] = state
 	}
 	c.persistenceErr = c.store.Save(session)
@@ -199,7 +201,8 @@ func (c *AudioController) Destination(id DestinationID) (*Destination, error) {
 	return cloneDestination(dest), nil
 }
 
-// OutputVirtualVolume returns the active destination's current virtual volume level.
+// OutputVirtualVolume returns the PipeWire-safe base level, capped at 100%.
+// Excess logical output gain is applied before the temporary EasyEffects limiter.
 func (c *AudioController) OutputVirtualVolume() PercentageLevel {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
@@ -243,7 +246,7 @@ func (c *AudioController) SetMicrophoneState(virtualMuted, physicalMuted bool, l
 	}
 	c.mic.VirtualMuted = virtualMuted
 	c.mic.PhysicalMuted = physicalMuted
-	c.mic.PostDSPLevel = level
+	c.mic.PostDSPLevel = NewPercentageLevel(level.Percent())
 	c.persist()
 }
 
@@ -312,19 +315,20 @@ func (c *AudioController) StepOutputVolume(steps int) PercentageLevel {
 	defer c.mu.Unlock()
 
 	mem := c.portMemory[c.activeDestination]
-	lvl := NewPercentageLevel(mem.VirtualVolume).AddSteps(steps * c.volumeStepPercent)
+	lvl := NewOutputLevel(mem.VirtualVolume+steps*c.volumeStepPercent, c.outputBoost)
 	mem.VirtualVolume = lvl.Percent()
 	c.portMemory[c.activeDestination] = mem
 	c.persist()
 	return lvl
 }
 
-// SetOutputVolume sets an exact virtual volume for the active destination.
+// SetOutputVolume sets the logical output level, bounded by the current mode.
 func (c *AudioController) SetOutputVolume(level PercentageLevel) PercentageLevel {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
 	mem := c.portMemory[c.activeDestination]
+	level = NewOutputLevel(level.Percent(), c.outputBoost)
 	mem.VirtualVolume = level.Percent()
 	c.portMemory[c.activeDestination] = mem
 	c.persist()
@@ -346,7 +350,7 @@ func (c *AudioController) SetMicLevel(level PercentageLevel) PercentageLevel {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
-	c.mic.PostDSPLevel = level
+	c.mic.PostDSPLevel = NewPercentageLevel(level.Percent())
 	c.persist()
 	return c.mic.PostDSPLevel
 }
@@ -432,6 +436,11 @@ func (c *AudioController) ResetToDailyBase() (preset string, outVol PercentageLe
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
+	c.outputBoost = false
+	for id, port := range c.portMemory {
+		port.VirtualVolume = min(port.VirtualVolume, 100)
+		c.portMemory[id] = port
+	}
 	dest := c.destinations[c.activeDestination]
 	mem := PortSessionState{
 		VirtualVolume: c.defaultVirtualVolume.Percent(),

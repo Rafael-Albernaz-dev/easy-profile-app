@@ -28,6 +28,8 @@ const (
 
 // DaemonStatus represents the complete serialized state broadcast to clients.
 type DaemonStatus struct {
+	OutputBoost                 bool            `json:"output_boost"`
+	OutputMaxPercent            int             `json:"output_max_percent"`
 	DSPBound                    bool            `json:"dsp_bound"`
 	MonitorVolumesConfirmed     bool            `json:"monitor_volumes_confirmed"`
 	PhysicalMicrophone          string          `json:"physical_microphone"`
@@ -139,6 +141,14 @@ func (d *Daemon) Close() {
 	<-d.done
 	d.mu.Lock()
 	defer d.mu.Unlock()
+	if !d.observeOnly && d.ctrl.OutputBoost() {
+		ctx, cancel := context.WithTimeout(context.Background(), 4*time.Second)
+		err := d.ee.SetOutputBoost(ctx, false, min(d.ctrl.OutputVolumePercent(), 100))
+		cancel()
+		if err != nil {
+			_ = d.pw.SetNodeMute(context.Background(), d.ctrl.ActiveDestination().PhysicalSinkName, true)
+		}
+	}
 	if !d.observeOnly && (d.ctrl.OutputSharing() || d.status.OutputSharingRestorePending) {
 		ctx, cancel := context.WithTimeout(context.Background(), 4*time.Second)
 		defer cancel()
@@ -191,16 +201,16 @@ func (d *Daemon) worker() {
 		if !r.panic && time.Since(r.created) > 18*time.Second {
 			err = errors.New("queued command expired")
 		} else if r.level != nil {
-			current := d.ctrl.OutputVirtualVolume().Percent()
+			current := d.ctrl.OutputVolumePercent()
 			if r.level.mic {
 				current = d.ctrl.Microphone().PostDSPLevel.Percent()
 			}
 			for _, member := range group {
 				level := member.level
 				if level.absolute {
-					current = domain.NewPercentageLevel(level.value).Percent()
+					current = domain.NewOutputLevel(level.value, !r.level.mic && d.ctrl.OutputBoost()).Percent()
 				} else {
-					current = domain.NewPercentageLevel(current + level.value).Percent()
+					current = domain.NewOutputLevel(current+level.value, !r.level.mic && d.ctrl.OutputBoost()).Percent()
 				}
 			}
 			result := 0
@@ -263,6 +273,7 @@ func (d *Daemon) Export(conn *dbus.Conn) error {
 		"ResetDefaults": d.ResetDefaults, "GetRawMicStreams": d.GetRawMicStreams, "MigrateRawMicStream": d.MigrateRawMicStream,
 		"ToggleMicMonitoring": d.ToggleMicMonitoring, "SetMicMonitoring": d.SetMicMonitoring,
 		"ToggleOutputSharing": d.ToggleOutputSharing, "SetOutputSharing": d.SetOutputSharing,
+		"ToggleOutputBoost": d.ToggleOutputBoost, "SetOutputBoost": d.SetOutputBoost,
 	}
 	if err := conn.ExportMethodTable(methods, dbus.ObjectPath(DBusPath), DBusInterface); err != nil {
 		return err
@@ -283,7 +294,12 @@ func (d *Daemon) updateStatus(err error) {
 	dest := d.ctrl.ActiveDestination()
 	mic := d.ctrl.Microphone()
 	d.status.ActiveDestination = DestinationInfo{string(dest.ID), dest.Label, dest.RouteName, dest.PhysicalCeiling.Percent()}
-	d.status.OutputVolume = d.ctrl.OutputVirtualVolume().Percent()
+	d.status.OutputVolume = d.ctrl.OutputVolumePercent()
+	d.status.OutputBoost = d.ctrl.OutputBoost()
+	d.status.OutputMaxPercent = 100
+	if d.status.OutputBoost {
+		d.status.OutputMaxPercent = domain.BoostMaximumPercent
+	}
 	d.status.OutputMuted = d.ctrl.OutputMuted()
 	d.status.MicLevel = mic.PostDSPLevel.Percent()
 	d.status.MicVirtualMuted = mic.VirtualMuted
@@ -618,6 +634,11 @@ func (d *Daemon) applyDestination(ctx context.Context, dest *domain.Destination)
 		case <-timer.C:
 		}
 	}
+	if d.ctrl.OutputBoost() {
+		if err = d.ee.SetOutputBoost(ctx, true, d.ctrl.OutputVolumePercent()); err != nil {
+			return err
+		}
+	}
 	if err = d.ee.LoadPreset(ctx, d.ctrl.ActiveOutputPreset()); err != nil {
 		return err
 	}
@@ -668,7 +689,16 @@ func (d *Daemon) ensureDSPBindings(ctx context.Context, dest *domain.Destination
 func (d *Daemon) GetStatus() (string, *dbus.Error) {
 	return d.statusJSON.Load().(string), nil
 }
-func (d *Daemon) applyVolume(ctx context.Context, target int, mic bool) (int, error) {
+func (d *Daemon) applyVolume(ctx context.Context, target int, mic bool) (applied int, retErr error) {
+	defer func() {
+		if retErr != nil && !mic && !d.observeOnly && d.ctrl.OutputBoost() {
+			// The worker deadline/cancellation may have caused the failure. A
+			// separate bounded context must still allow the fail-safe mute.
+			safe, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+			defer cancel()
+			retErr = errors.Join(retErr, d.pw.SetNodeMute(safe, d.ctrl.ActiveDestination().PhysicalSinkName, true))
+		}
+	}()
 	if err := d.control(); err != nil {
 		return 0, err
 	}
@@ -676,8 +706,13 @@ func (d *Daemon) applyVolume(ctx context.Context, target int, mic bool) (int, er
 	if mic {
 		node = d.hardware.VirtualSource
 	}
-	level := domain.NewPercentageLevel(target)
-	if err := d.pw.SetNodeVolume(ctx, node, level.LinearRatio()); err != nil {
+	level := domain.NewOutputLevel(target, !mic && d.ctrl.OutputBoost())
+	if !mic && d.ctrl.OutputBoost() {
+		if err := d.ee.SetOutputBoost(ctx, true, level.Percent()); err != nil {
+			return 0, err
+		}
+	}
+	if err := d.pw.SetNodeVolume(ctx, node, domain.NewPercentageLevel(level.Percent()).LinearRatio()); err != nil {
 		return 0, err
 	}
 	if err := d.pw.EnsureMonitorChannelVolumes(ctx, node); err != nil {
@@ -861,6 +896,11 @@ func (d *Daemon) ResetDefaults() *dbus.Error {
 		}
 		if err := d.stopSharing(ctx); err != nil {
 			return err
+		}
+		if d.ctrl.OutputBoost() {
+			if err := d.setOutputBoost(ctx, false); err != nil {
+				return err
+			}
 		}
 		// Read both mic states before reset; never collapse a divergent pair.
 		virtual, e1 := d.pw.GetNodeMute(ctx, d.hardware.VirtualSource)

@@ -13,6 +13,22 @@ let signalId = 0;
 let signalSeen = false;
 let cancelSource = 0;
 const pendingCall = new Gio.Cancellable();
+function verifyBoost(client, done) {
+ client.SetOutputBoostRemote(true, (reply,error)=> {
+  if(error||reply[0]!==true){printerr(error??'Boost enable failed');loop.quit();return;}
+  client.SetVolumeAbsoluteRemote(112,(level,levelError)=> {
+   if(levelError||level[0]!==112){printerr(levelError??'Boost level failed');loop.quit();return;}
+   client.ToggleOutputBoostRemote((off,offError)=> {
+    if(offError||off[0]!==false){printerr(offError??'Boost disable failed');loop.quit();return;}
+    client.GetStatusRemote(([json],statusError)=>{
+     const state=JSON.parse(json);
+     if(statusError||state.output_boost||state.output_volume!==100){printerr(statusError??'Boost readback failed');loop.quit();return;}
+     done();
+    },cancellable);
+   },cancellable);
+  },cancellable);
+ },cancellable);
+}
 function verifySharing(client, done) {
     client.SetOutputSharingRemote(true, (reply, error) => {
         if (error || reply[0] !== true) { printerr(error ?? 'invalid sharing reply'); loop.quit(); return; }
@@ -20,7 +36,7 @@ function verifySharing(client, done) {
             if (statusError || !JSON.parse(json).output_sharing) { printerr(statusError ?? 'sharing readback missing'); loop.quit(); return; }
             client.ToggleOutputSharingRemote((offReply, offError) => {
                 if (offError || offReply[0] !== false) { printerr(offError ?? 'sharing did not stop'); loop.quit(); return; }
-                done();
+                verifyBoost(client, done);
             }, cancellable);
         }, cancellable);
     }, cancellable);

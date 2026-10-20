@@ -33,11 +33,11 @@ function extension() {
         _levelInFlight: new Set(), _retrySources: new Set(), _barriers: [], _barrierBusy: false,
         _status: status(), _targetChannel: 'out', _keybindingKeys: [], _keymap: {get_num_lock_state: () => true},
         _cancellable: {cancel() {}}, _settings: {}});
-    for (const key of ['_label', '_icon', '_muteBadge', '_micMuteBadge', '_listenBadge', '_shareItem', '_btnAKG', '_btnSP166',
+    for (const key of ['_label', '_icon', '_muteBadge', '_micMuteBadge', '_listenBadge', '_shareItem', '_boostItem', '_btnAKG', '_btnSP166',
         '_volSlider', '_micSlider', '_btnMuteOut', '_btnMuteMic', '_presetsSubMenu', '_warningBanner', '_rawStreamMenu']) e[key] = actor();
     const calls = [];
     const proxy = {g_name_owner: ':fake.1'};
-    for (const method of ['SetVolumeForDestination', 'SetMicVolumeAbsolute', 'SelectDestination', 'ResetDefaults', 'SelectPreset', 'SetOutputSharing']) {
+    for (const method of ['SetVolumeForDestination', 'SetMicVolumeAbsolute', 'SelectDestination', 'ResetDefaults', 'SelectPreset', 'SetOutputSharing', 'SetOutputBoost', 'ToggleOutputBoost']) {
         proxy[`${method}Remote`] = (...args) => {
             const cancellable = args.pop(); const callback = args.pop();
             assert.equal(cancellable, e._cancellable);
@@ -112,19 +112,21 @@ function extension() {
     bindings.get('shortcut-noop-7').handler(); assert.equal(actions[2][0], 'ToggleMicMonitoring');
     bindings.get('shortcut-select-mic').handler(); assert.equal(e._targetChannel, 'mic');
     bindings.get('shortcut-noop-8').handler(); assert.equal(actions[3][0], 'ToggleOutputSharing');
-    bindings.get('shortcut-noop-9').handler(); assert.equal(actions.length, 4);
+    bindings.get('shortcut-noop-9').handler(); assert.equal(actions[4][0], 'ToggleOutputBoost');
+    assert.equal(actions.length, 5);
     e._status.available_presets = ['Preset Base', 'Preset 2', 'Preset 3'];
     e._status.active_preset = 'Preset 2';
     bindings.get('shortcut-preset-1').handler();
-    assert.equal(actions[4][0], 'SelectPreset'); assert.deepEqual(Array.from(actions[4][1]), ['Preset Base']);
-    bindings.get('shortcut-preset-2').handler();
     assert.equal(actions[5][0], 'SelectPreset'); assert.deepEqual(Array.from(actions[5][1]), ['Preset Base']);
+    bindings.get('shortcut-preset-2').handler();
+    assert.equal(actions[6][0], 'SelectPreset'); assert.deepEqual(Array.from(actions[6][1]), ['Preset Base']);
     bindings.get('shortcut-preset-3').handler();
-    assert.equal(actions[6][0], 'SelectPreset'); assert.deepEqual(Array.from(actions[6][1]), ['Preset 3']);
-    assert.equal(actions.length, 7);
+    assert.equal(actions[7][0], 'SelectPreset'); assert.deepEqual(Array.from(actions[7][1]), ['Preset 3']);
+    assert.equal(actions.length, 8);
     e._keymap.get_num_lock_state = () => false;
-    bindings.get('shortcut-mute-panic').handler(); bindings.get('shortcut-noop-8').handler();
-    assert.equal(actions.length, 7);
+    bindings.get('shortcut-mute-panic').handler();
+    bindings.get('shortcut-noop-8').handler(); bindings.get('shortcut-noop-9').handler();
+    assert.equal(actions.length, 8);
     e._unregisterKeybindings(); assert.equal(bindings.size, 0);
 }
 {
@@ -149,3 +151,22 @@ function extension() {
     assert.match(e._label.text, /RESTAURAR ENTRADA/);
 }
 console.log('Extension regressions passed: sharing/readback/lifecycle, destination/reset barriers, late signals/errors, NumLock and repeat flags.');
+
+{
+ const {e,calls}=extension();
+ e._status={...status('akg',100),output_boost:true,output_max_percent:112};
+ e._queueLevel('out',120,true);
+ assert.deepEqual(Array.from(calls[0].args),['akg',112]);
+ assert.match(e._label.text,/112%.*BOOST/);
+ e._queueLevel('mic',112,true);
+ assert.deepEqual(Array.from(calls[1].args),[100]);
+ e._callDBus('SetOutputBoost',[false]);
+ assert.equal(e._pendingLevels.size,0);
+ assert.equal(calls.length,2,'Boost toggle must wait for in-flight levels');
+ calls[0].callback([112],null); calls[1].callback([100],null);
+ assert.equal(calls[2].method,'SetOutputBoost');
+ e._status={...status('akg',100),output_boost:false,output_max_percent:100};
+ calls[2].callback([false],null);
+ e._queueLevel('out',1,false);
+ assert.deepEqual(Array.from(calls[3].args),['akg',100]);
+}

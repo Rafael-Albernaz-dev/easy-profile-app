@@ -15,7 +15,7 @@ The calibrated setup uses AKG K52 front headphones, SP166 rear speakers and the 
 - Raw microphone captures are reported. Migration is explicit per application, rejects ambiguity and confirms processed links.
 - Status reads use an immutable published snapshot, independently of slow hardware operations. UI level requests carry a destination, and route/reset barriers discard pending levels and wait for calls already sent.
 - Microphone monitoring (post-DSP sidetone) creates dedicated PipeWire links from `easyeffects_source` to `easyeffects_sink`. A blue headset panel icon indicates active monitoring, and enabling monitoring automatically un-mutes the microphone if muted.
-- Temporary whole-output sharing replaces one active call capture's microphone with the selected physical output monitor. The menu switch and `share on|off|toggle` restore the previous capture target on stop. Sharing includes notifications and participants' voices; it cannot run together with mic monitoring. Mic mute, panic, Reset and destination selection stop it. See [behavior and human QA](docs/features/OUTPUT_SHARING.md).
+- Temporary whole-output sharing replaces one active call capture's microphone with the selected physical output monitor. Keypad `8`, the menu switch and `share on|off|toggle` restore the previous capture target on stop. Sharing includes notifications and participants' voices; it cannot run together with mic monitoring. Mic mute, panic, Reset and destination selection stop it. See [behavior and human QA](docs/features/OUTPUT_SHARING.md).
 
 Automated tests use in-memory audio adapters with `EASYPROFILE_TEST_MODE=1`. No test may control real audio. Production guards and the three calibrated preset files remain untouched during development. Passing local gates does not certify physical routing, sound quality or GNOME Shell behavior.
 
@@ -37,7 +37,7 @@ See the [implementation, safety contract and human validation](docs/features/SYS
 | Key | Action | Repeat |
 |---|---|---|
 | `NumLock` | Audio mode on/off (`⚡`); off restores normal keypad behavior | Native toggle |
-| `+` | Focused output/mic volume +1%, clamped to 100% | Yes |
+| `+` | Focused output/mic volume +1%; output up to 112% with Boost, microphone always ≤100% | Yes |
 | `-` | Focused output/mic volume −1%, clamped to 0% | Yes |
 | `1` | Select AKG K52; focus output | No |
 | `2` | Select SP166; focus output | No |
@@ -51,8 +51,8 @@ See the [implementation, safety contract and human validation](docs/features/SYS
 | `/` | DynamicEqualizer placeholder; logs intent, no DSP change | No |
 | `*` | Daily reset: base preset, output 95%, mic 100%; preserves both mic mutes | No |
 | `7` | Toggle post-DSP microphone monitoring (sidetone); blue headset panel icon; auto-unmutes mic | No |
-| `8` | Reserved, silent no-op | No |
-| `9` | Reserved, silent no-op | No |
+| `8` | Toggle whole-output sharing into one active call capture | No |
+| `9` | Toggle output Boost: unlock 112% ceiling without raising the current level | No |
 
 NumLock is monitored natively; the other 16 bindings are registered only in audio mode. Only `+`/`-` allow autorepeat. Routine actions produce no OSD; real errors do. Volume labels update locally while confirmation is pending. Icons/mute claims use daemon state rather than assuming hardware success. Restart is available from the menu through systemd only; `*` does not restart the daemon.
 
@@ -142,9 +142,9 @@ Measured budgets: parser <5 ms/op; direct status read during blocked hardware <5
 
 Healthy reconciliation reuses one fresh graph observation and avoids redundant preset inspection and unchanged session writes. Repairs still require a new readback; mute observations remain independent. Five equivalent read pairs showed median wall time **889.80 → 218.66 ms** and CPU time **598.51 → 123.99 ms**. These compare read paths, not continuous daemon CPU or DSP cost.
 
-Race tests, static checks, fake installer tests, private D-Bus integration and extension packaging passed. Full gate approval remains pending: the gate still expects legacy guards to be active after the completed cutover, and the fake CLI p95 recheck measured **17.57 ms** against a **15 ms** budget. The isolated parser recheck passed at **4.125 ms/op**. See [scope, measurements and human validation](docs/performance/RECONCILIATION_OPTIMIZATION.md).
+Race tests, static checks, fake installer tests, private D-Bus integration and extension packaging passed. Full gate approval remains pending because the gate still expects legacy guards to be active after the completed cutover. The latest isolated Boost-slice checks met the fake/captured budgets: CLI p95 **5.257 ms**, parser **3.497 ms/op**, fake idle CPU **0%** and RSS after commands **9,716 KiB**. These do not measure actual Boost DSP performance. See [scope, measurements and human validation](docs/performance/RECONCILIATION_OPTIMIZATION.md).
 
-Boost remains unimplemented; keypad `9` is reserved and volume remains capped at 100%.
+Keypad `9`, the Boost menu switch and `boost on|off|toggle` unlock an output ceiling of **112% (~+2.95 dB)**. Enabling does not raise the current level: use `+`/`−` or the slider afterwards. A temporary final LSP limiter applies the extra gain before limiting, without editing preset files or raising physical/microphone ceilings. Turning Boost off clamps levels above 100% to 100%; Reset and daemon restart start without Boost. Preset/route changes retain Boost within the running daemon. See [Boost behavior, engineering and human QA](docs/features/OUTPUT_BOOST.md).
 
 ## Observation and CLI
 

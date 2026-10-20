@@ -60,6 +60,7 @@ func TestDBusIntegrationAllMethodsAndSignals(t *testing.T) {
 		{"SelectPreset", []interface{}{"AKG K52 - Rock e Metal"}}, {"ResetDefaults", nil}, {"GetRawMicStreams", nil}, {"MigrateRawMicStream", []interface{}{"Recorder"}},
 		{"ToggleMicMonitoring", nil}, {"SetMicMonitoring", []interface{}{false}},
 		{"SetOutputSharing", []interface{}{true}}, {"ToggleOutputSharing", nil},
+		{"SetOutputBoost", []interface{}{true}}, {"SetVolumeAbsolute", []interface{}{int32(112)}}, {"ToggleOutputBoost", nil}, {"ResetDefaults", nil},
 	}
 	for _, tc := range calls {
 		if err := obj.CallWithContext(ctx, DBusInterface+"."+tc.name, 0, tc.args...).Err; err != nil {

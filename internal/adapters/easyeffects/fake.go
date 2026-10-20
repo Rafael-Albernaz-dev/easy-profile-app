@@ -2,6 +2,7 @@ package easyeffects
 
 import (
 	"context"
+	"fmt"
 	"sync"
 
 	"github.com/toru/easy-profile-app/internal/adapters"
@@ -19,6 +20,9 @@ type FakeEasyEffects struct {
 	Devices          adapters.DSPDevices
 	DevicesErr       error
 	EnsureDevicesErr error
+	BoostEnabled     bool
+	BoostPercent     int
+	BoostErr         error
 }
 
 var _ adapters.EasyEffectsPort = (*FakeEasyEffects)(nil)
@@ -85,4 +89,15 @@ func (f *FakeEasyEffects) ListAvailablePresets(ctx context.Context) ([]string, e
 	res := make([]string, len(f.AvailablePresets))
 	copy(res, f.AvailablePresets)
 	return res, nil
+}
+
+func (f *FakeEasyEffects) SetOutputBoost(ctx context.Context, enabled bool, percent int) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.BoostErr != nil {
+		return f.BoostErr
+	}
+	f.BoostEnabled, f.BoostPercent = enabled, percent
+	f.Calls = append(f.Calls, fmt.Sprintf("SetOutputBoost:%t:%d", enabled, percent))
+	return nil
 }

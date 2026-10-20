@@ -58,6 +58,8 @@ func run(args []string, stdout, stderr io.Writer) int {
 		return runReset(args[1:], stdout, stderr)
 	case "listen", "monitor":
 		return runListen(args[1:], stdout, stderr)
+	case "boost":
+		return runBoost(args[1:], stdout, stderr)
 	case "share":
 		return runShare(args[1:], stdout, stderr)
 	case "inspect":
@@ -82,13 +84,14 @@ commands:
   daemon                  run the background D-Bus daemon (org.easyprofile.Daemon)
   status                  query and display current audio routes, volume, mutes and presets
   route [akg|sp166|toggle] switch or toggle active audio destination
-  volume [+1|-1|<level>]  adjust or set output volume (0..100)
+  volume [+1|-1|<level>]  adjust or set output volume (0..100; Boost: 0..112)
   mic [+1|-1|<level>]     adjust or set microphone post-DSP level (0..100)
   mute [out|mic]          toggle mute on output or microphone (Dual-Mute)
   panic                   emergency mute all channels or restore previous state
   preset [list|next|prev|base|<name>] list, cycle or apply a compatible equalizer preset
   reset                   restore daily base preset, output 95%, mic 100% (preserves mic mute)
   listen [on|off|toggle]  toggle or set mic monitoring (listening with DSP filters)
+  boost [on|off|toggle]   unlock output ceiling to 112% without raising current level
   share [on|off|toggle]   replace an active call's microphone with the whole output
   inspect                 read-only inspection of PipeWire, ALSA, and EasyEffects
   version                 print version`)
@@ -346,6 +349,7 @@ func runStatus(args []string, stdout, stderr io.Writer) int {
 	}
 	fmt.Fprintf(stdout, "  Mic Listen:   %s\n", monStr)
 	fmt.Fprintf(stdout, "  Output Share: %t (restoration pending: %t)\n", s.OutputSharing, s.OutputSharingRestorePending)
+	fmt.Fprintf(stdout, "  Output Boost: %t (ceiling: %d%%)\n", s.OutputBoost, s.OutputMaxPercent)
 	fmt.Fprintf(stdout, "  Panic Mute:   %s\n", panicStr)
 	fmt.Fprintf(stdout, "  Preset:       %s\n", s.ActivePreset)
 	if len(s.AvailablePresets) > 0 {
@@ -363,7 +367,7 @@ func runStatus(args []string, stdout, stderr io.Writer) int {
 
 func runVolume(args []string, stdout, stderr io.Writer) int {
 	if len(args) == 0 {
-		fmt.Fprintln(stderr, "usage: easyprofilectl volume [+1|-1|<level 0-100>]")
+		fmt.Fprintln(stderr, "usage: easyprofilectl volume [+1|-1|<level 0-112>]")
 		return 2
 	}
 	conn, obj, err := getDBusObject()
@@ -387,8 +391,8 @@ func runVolume(args []string, stdout, stderr io.Writer) int {
 		}
 	} else {
 		level, err := strconv.Atoi(arg)
-		if err != nil || level < 0 || level > 100 {
-			fmt.Fprintf(stderr, "invalid volume level %q (must be 0..100): %v\n", arg, err)
+		if err != nil || level < 0 || level > domain.BoostMaximumPercent {
+			fmt.Fprintf(stderr, "invalid volume level %q (must be 0..112; above 100 requires Boost): %v\n", arg, err)
 			return 2
 		}
 		if err := busCall(obj, daemon.DBusInterface+".SetVolumeAbsolute", 0, int32(level)).Store(&newVol); err != nil {

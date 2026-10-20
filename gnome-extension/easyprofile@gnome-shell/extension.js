@@ -77,7 +77,7 @@ export default class EasyProfileExtension extends Extension {
         this._status = null;
         for (const field of ['_box', '_icon', '_label', '_muteBadge', '_micMuteBadge', '_listenBadge', '_menu',
             '_routeBox', '_btnAKG', '_btnSP166', '_volItem', '_volIcon', '_volSlider',
-            '_btnMuteOut', '_micItem', '_micIcon', '_micSlider', '_btnMuteMic', '_micListenItem', '_shareItem',
+            '_btnMuteOut', '_micItem', '_micIcon', '_micSlider', '_btnMuteMic', '_micListenItem', '_shareItem', '_boostItem',
             '_presetsSubMenu', '_warningBanner', '_rawStreamMenu']) this[field] = null;
         this._keymap = null;
     }
@@ -170,7 +170,7 @@ export default class EasyProfileExtension extends Extension {
         this._volSlider.x_expand = true;
         this._volSlider.connect('notify::value', () => {
             if (this._updatingSliders) return;
-            const pct = Math.round(this._volSlider.value * 100);
+            const pct = Math.round(this._volSlider.value * (this._status?.output_max_percent ?? 100));
             this._queueLevel('out', pct, true);
         });
         this._btnMuteOut = new St.Button({
@@ -217,12 +217,18 @@ export default class EasyProfileExtension extends Extension {
         });
         this._menu.addMenuItem(this._micListenItem);
 
-        this._shareItem = new PopupMenu.PopupSwitchMenuItem('Compartilhar toda a saída na chamada', false);
+        this._shareItem = new PopupMenu.PopupSwitchMenuItem('Compartilhar toda a saída na chamada [8]', false);
         this._shareItem.connect('toggled', (_item, enabled) => {
             if (this._updatingShare) return;
             this._setOutputSharing(enabled);
         });
         this._menu.addMenuItem(this._shareItem);
+        this._boostItem = new PopupMenu.PopupSwitchMenuItem('Boost da saída (até 112%) [9]', false);
+        this._boostItem.connect('toggled', (_item, enabled) => {
+            if (!this._updatingBoost) this._callDBus('SetOutputBoost', [enabled]);
+        });
+        this._menu.addMenuItem(this._boostItem);
+
 
         this._menu.addMenuItem(new PopupMenu.PopupSeparatorMenuItem());
 
@@ -286,6 +292,7 @@ export default class EasyProfileExtension extends Extension {
         if (this._btnSP166) this._btnSP166.reactive = connected;
         if (this._presetsSubMenu) this._presetsSubMenu.reactive = connected;
         if (this._shareItem) this._shareItem.reactive = connected;
+        if (this._boostItem) this._boostItem.reactive = connected;
         if (this._restartItem?.label?.set_text) {
             this._restartItem.label.set_text(connected ? '🔄 Reiniciar EasyProfile' : '⚡ Forçar Ativação do EasyProfile');
         }
@@ -403,7 +410,7 @@ export default class EasyProfileExtension extends Extension {
 
             // 3. Update Sliders (without re-triggering remote calls)
             this._updatingSliders = true;
-            this._volSlider.value = this._displayLevel('out') / 100.0;
+            this._volSlider.value = this._displayLevel('out') / (s.output_max_percent ?? 100);
             this._micSlider.value = this._displayLevel('mic') / 100.0;
             this._updatingSliders = false;
 
@@ -431,10 +438,15 @@ export default class EasyProfileExtension extends Extension {
                 this._shareItem.setToggleState(Boolean(s.output_sharing || s.output_sharing_restore_pending));
                 this._shareItem.label.set_text(s.output_sharing_restore_pending
                     ? 'Compartilhamento: concluir restauração da entrada'
-                    : 'Compartilhar toda a saída na chamada');
+                    : 'Compartilhar toda a saída na chamada [8]');
                 this._updatingShare = false;
             }
 
+            if (this._boostItem) {
+                this._updatingBoost = true;
+                this._boostItem.setToggleState(Boolean(s.output_boost));
+                this._updatingBoost = false;
+            }
             // 5. Update Presets Submenu
             this._presetsSubMenu.menu.removeAll();
             for (const presetName of s.available_presets || []) {
@@ -485,12 +497,13 @@ export default class EasyProfileExtension extends Extension {
         const numLockOn = this._keymap ? Boolean(this._keymap.get_num_lock_state()) : false;
         const modeMarker = numLockOn ? '⚡' : '';
         const observeMarker = this._status.observe_only ? ' (observação)' : '';
+        const boostMarker = this._status.output_boost ? ' • BOOST' : '';
         const shareMarker = this._status.output_sharing ? ' • COMPARTILHANDO' :
             (this._status.output_sharing_restore_pending ? ' • RESTAURAR ENTRADA' : '');
         if (numLockOn && this._targetChannel === 'mic') {
-            this._label.set_text(`${modeMarker}MIC ${this._displayLevel('mic')}%${observeMarker}${shareMarker}`);
+            this._label.set_text(`${modeMarker}MIC ${this._displayLevel('mic')}%${observeMarker}${boostMarker}${shareMarker}`);
         } else {
-            this._label.set_text(`${modeMarker}${destShort} ${this._displayLevel('out')}%${observeMarker}${shareMarker}`);
+            this._label.set_text(`${modeMarker}${destShort} ${this._displayLevel('out')}%${observeMarker}${boostMarker}${shareMarker}`);
         }
     }
 
@@ -537,7 +550,7 @@ export default class EasyProfileExtension extends Extension {
     }
 
     _callDBus(method, args, done = null) {
-        if (['SelectDestination', 'ToggleDestination', 'ResetDefaults', 'SelectPreset'].includes(method)) {
+        if (['SelectDestination', 'ToggleDestination', 'ResetDefaults', 'SelectPreset', 'ToggleOutputBoost', 'SetOutputBoost'].includes(method)) {
             this._invalidateLevels();
             this._barriers.push({method, args, done});
             this._drainBarriers();
@@ -623,7 +636,7 @@ export default class EasyProfileExtension extends Extension {
             pending = {value: channel === 'mic' ? (this._status?.mic_level ?? 100) : (this._status?.output_volume ?? 95), busy: false, dirty: false};
             this._pendingLevels.set(key, pending);
         }
-        pending.value = Math.max(0, Math.min(100, absolute ? value : pending.value + value));
+        pending.value = Math.max(0, Math.min(channel === 'mic' ? 100 : (this._status?.output_max_percent ?? 100), absolute ? value : pending.value + value));
         pending.dirty = true;
 
         this._updateLabel();
@@ -807,7 +820,9 @@ export default class EasyProfileExtension extends Extension {
             {name: 'shortcut-noop-8', flags: noRepeat, handler: () => {
                 this._callDBus('ToggleOutputSharing', []);
             }},
-            {name: 'shortcut-noop-9', flags: noRepeat, handler: () => {}},
+            {name: 'shortcut-noop-9', flags: noRepeat, handler: () => {
+                this._callDBus('ToggleOutputBoost', []);
+            }},
         ];
 
 

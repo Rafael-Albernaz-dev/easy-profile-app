@@ -25,8 +25,10 @@ var (
 // via CLI (easyeffects -l), GSettings (com.github.wwmm.easyeffects), and filesystem read of output presets.
 // Invariants: Never modifies preset files (docs/RULES.md §1.3), blocks host execution when EASYPROFILE_TEST_MODE=1.
 type RealEasyEffects struct {
-	configDir string
-	timeout   time.Duration
+	boostEnabled bool
+	boostPercent int
+	configDir    string
+	timeout      time.Duration
 }
 
 // NewRealEasyEffects creates an EasyEffects adapter instance.
@@ -74,7 +76,14 @@ func (r *RealEasyEffects) LoadPreset(ctx context.Context, presetName string) err
 	ticker := time.NewTicker(50 * time.Millisecond)
 	defer ticker.Stop()
 	for {
-		active, err := r.GetActivePreset(ctx)
+		var active string
+		var err error
+		if r.boostEnabled {
+			err = r.restorePresetBoost(ctx, presetName)
+		}
+		if err == nil {
+			active, err = r.GetActivePreset(ctx)
+		}
 		if err == nil && active == presetName {
 			return nil
 		}
@@ -118,6 +127,16 @@ func (r *RealEasyEffects) GetActivePreset(ctx context.Context) (string, error) {
 	plugins, err := exec.CommandContext(ctx, "gsettings", "get", "com.github.wwmm.easyeffects.streamoutputs", "plugins").Output()
 	if err != nil {
 		return "", err
+	}
+	if r.boostEnabled {
+		expected = append(expected, boostPlugin)
+		values, err := r.boostSettings(ctx)
+		if err != nil {
+			return "", err
+		}
+		if err := validateBoostSettings(values, r.boostPercent); err != nil {
+			return "", err
+		}
 	}
 	if !slices.Equal(parsePlugins(string(plugins)), expected) {
 		return "", errors.New("active plugin chain differs from preset")
@@ -185,6 +204,9 @@ func (r *RealEasyEffects) presetPlugins(name string) ([]string, error) {
 	}
 	if err := json.Unmarshal(data, &preset); err != nil {
 		return nil, err
+	}
+	if slices.Contains(preset.Output.Plugins, boostPlugin) {
+		return nil, errors.New("preset uses reserved Boost limiter instance")
 	}
 	if len(preset.Output.Plugins) == 0 {
 		return nil, errors.New("empty output plugin chain")

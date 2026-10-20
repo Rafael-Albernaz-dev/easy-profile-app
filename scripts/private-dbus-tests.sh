@@ -78,6 +78,15 @@ RESULT="$("${CTL}" status --json)"
 rg -q '"output_sharing":false' <<< "${RESULT}"
 "${CTL}" share on
 "${CTL}" share off
+"${CTL}" boost on
+RESULT="$("${CTL}" volume 112)"
+rg -q '112%' <<< "${RESULT}"
+RESULT="$("${CTL}" status --json)"
+rg -q '"output_boost":true' <<< "${RESULT}"
+"${CTL}" boost off
+RESULT="$("${CTL}" status --json)"
+rg -q '"output_volume":100' <<< "${RESULT}"
+
 if "${CTL}" share invalid >/dev/null 2>&1; then exit 1; fi
 "${CTL}" route sp166
 RESULT="$("${CTL}" preset list)"

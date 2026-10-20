@@ -80,6 +80,7 @@ type AlsaPort interface {
 
 // EasyEffectsPort defines the preset management capabilities for EasyEffects.
 type EasyEffectsPort interface {
+	SetOutputBoost(ctx context.Context, enabled bool, percent int) error
 	ReadDevices(ctx context.Context) (DSPDevices, error)
 	EnsureDevices(ctx context.Context, output, input string) error
 	// LoadPreset applies an output preset by name.

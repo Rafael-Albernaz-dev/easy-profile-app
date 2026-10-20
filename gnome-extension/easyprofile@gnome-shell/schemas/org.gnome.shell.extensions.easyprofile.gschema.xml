@@ -74,7 +74,7 @@
     </key>
     <key name="shortcut-noop-9" type="as">
       <default><![CDATA[['KP_9']]]></default>
-      <summary>No-Op Silencioso 9</summary>
+      <summary>Alternar Boost da saída até 112%</summary>
     </key>
   </schema>
 </schemalist>

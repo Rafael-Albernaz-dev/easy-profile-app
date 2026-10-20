@@ -49,3 +49,22 @@ func TestParseOrderedGSettingsPlugins(t *testing.T) {
 		t.Fatal(got)
 	}
 }
+
+func TestReservedBoostInstanceCannotComeFromPresetFile(t *testing.T) {
+	root := t.TempDir()
+	if err := os.Mkdir(filepath.Join(root, "output"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	data := []byte(`{"output":{"plugins_order":["equalizer#0","limiter#99"]}}`)
+	path := filepath.Join(root, "output", "AKG - Reserved.json")
+	if err := os.WriteFile(path, data, 0600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := NewRealEasyEffects(root, 0).presetPlugins("AKG - Reserved"); err == nil {
+		t.Fatal("reserved limiter collision accepted")
+	}
+	after, err := os.ReadFile(path)
+	if err != nil || sha256.Sum256(after) != sha256.Sum256(data) {
+		t.Fatal("preset rewritten")
+	}
+}
