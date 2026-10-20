@@ -23,8 +23,21 @@ type DSPDevices struct {
 	UseDefaultInput, UseDefaultOutput bool
 }
 
+// PipeWireObservation derives the related graph checks from one fresh snapshot.
+// Mute readbacks remain independent, using the existing wpctl path.
+type PipeWireObservation struct {
+	Graph              GraphState
+	GraphError         error
+	RawMicStreams      []string
+	SinkPort           string
+	MicMonitoring      bool
+	MicMonitoringKnown bool
+	Sharing            OutputSharingState
+}
+
 // PipeWirePort defines the audio graph mutation and inspection capabilities required by the daemon.
 type PipeWirePort interface {
+	ReadObservation(ctx context.Context, sink, source, physicalSink, micPrefix string) (PipeWireObservation, error)
 	StartOutputSharing(ctx context.Context, sink string) error
 	StopOutputSharing(ctx context.Context) error
 	ReadOutputSharing(ctx context.Context) (OutputSharingState, error)

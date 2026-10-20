@@ -17,21 +17,22 @@ type PanicSnapshot struct {
 // AudioController is the root domain aggregate governing audio routes, per-port volume memory,
 // Dual-Mute privacy, Panic Mute snapshots with manual overrides, and daily baseline resets.
 type AudioController struct {
-	mu                   sync.RWMutex
-	destinations         map[DestinationID]*Destination
-	activeDestination    DestinationID
-	portMemory           map[DestinationID]PortSessionState
-	outputMuted          bool
-	volumeStepPercent    int
-	defaultVirtualVolume PercentageLevel
-	mic                  *Microphone
-	panicState           PanicSnapshot
-	micMonitoring        bool
-	outputSharing        bool // transient; never restored automatically from disk
-	store                *SessionStore
-	sessionID            string
-	persistenceErr       error
-	restoredSession      bool
+	mu                    sync.RWMutex
+	destinations          map[DestinationID]*Destination
+	activeDestination     DestinationID
+	portMemory            map[DestinationID]PortSessionState
+	outputMuted           bool
+	volumeStepPercent     int
+	defaultVirtualVolume  PercentageLevel
+	mic                   *Microphone
+	panicState            PanicSnapshot
+	micMonitoring         bool
+	outputSharing         bool // transient; never restored automatically from disk
+	store                 *SessionStore
+	sessionID             string
+	persistenceErr        error
+	restoredSession       bool
+	persistedSuccessfully bool
 }
 
 // NewAudioController constructs the controller, optionally restoring previous session data.
@@ -175,6 +176,9 @@ func (c *AudioController) persist() {
 		session.Ports[id] = state
 	}
 	c.persistenceErr = c.store.Save(session)
+	if c.persistenceErr == nil {
+		c.persistedSuccessfully = true
+	}
 }
 
 // ActiveDestination returns the currently active destination entity.
@@ -234,6 +238,9 @@ func (c *AudioController) Microphone() Microphone {
 func (c *AudioController) SetMicrophoneState(virtualMuted, physicalMuted bool, level PercentageLevel) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	if c.mic.VirtualMuted == virtualMuted && c.mic.PhysicalMuted == physicalMuted && c.mic.PostDSPLevel == level && c.persistenceErr == nil && (c.store == nil || c.persistedSuccessfully) {
+		return
+	}
 	c.mic.VirtualMuted = virtualMuted
 	c.mic.PhysicalMuted = physicalMuted
 	c.mic.PostDSPLevel = level

@@ -2,6 +2,7 @@ package pipewire
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sync"
 
@@ -31,6 +32,19 @@ type FakePipeWire struct {
 	StartSharingErr       error
 	StopSharingErr        error
 	ReadSharingErr        error
+	ObservationReads      int
+}
+
+func (f *FakePipeWire) ReadObservation(ctx context.Context, sink, source, physicalSink, micPrefix string) (adapters.PipeWireObservation, error) {
+	f.mu.Lock()
+	f.ObservationReads++
+	f.mu.Unlock()
+	graph, graphErr := f.ReadGraphState(ctx, sink, source, physicalSink, micPrefix)
+	raw, rawErr := f.GetRawMicStreams(ctx, micPrefix)
+	route, routeErr := f.GetSinkPort(ctx, physicalSink)
+	monitoring, monitorErr := f.GetMicMonitoring(ctx, source, sink)
+	sharing, sharingErr := f.ReadOutputSharing(ctx)
+	return adapters.PipeWireObservation{Graph: graph, GraphError: graphErr, RawMicStreams: raw, SinkPort: route, MicMonitoring: monitoring, MicMonitoringKnown: monitorErr == nil, Sharing: sharing}, errors.Join(graphErr, rawErr, routeErr, monitorErr, sharingErr)
 }
 
 func (f *FakePipeWire) StartOutputSharing(ctx context.Context, sink string) error {

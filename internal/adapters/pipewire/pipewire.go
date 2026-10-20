@@ -320,23 +320,14 @@ func (r *RealPipeWire) GetRawMicStreams(ctx context.Context, micNodeName string)
 		return nil, err
 	}
 
-	ctx, cancel := context.WithTimeout(ctx, r.timeout)
-	defer cancel()
-
-	cmd := exec.CommandContext(ctx, "pw-dump", "--no-colors")
-	var stdout, stderr bytes.Buffer
-	cmd.Stdout = &stdout
-	cmd.Stderr = &stderr
-
-	if err := cmd.Run(); err != nil {
-		return nil, fmt.Errorf("pw-dump failed: %w (stderr: %s)", err, stderr.String())
-	}
-
-	g, err := inspect.ParseGraph(stdout.Bytes())
+	g, err := r.graph(ctx)
 	if err != nil {
-		return nil, fmt.Errorf("failed to parse pw-dump: %w", err)
+		return nil, err
 	}
+	return rawMicStreams(g, micNodeName)
+}
 
+func rawMicStreams(g *inspect.Graph, micNodeName string) ([]string, error) {
 	mic, err := resolveMicrophone(g, micNodeName)
 	if err != nil {
 		return nil, err
@@ -415,6 +406,10 @@ func (r *RealPipeWire) GetSinkPort(ctx context.Context, name string) (string, er
 	if err != nil {
 		return "", err
 	}
+	return sinkPort(g, name)
+}
+
+func sinkPort(g *inspect.Graph, name string) (string, error) {
 	for _, n := range g.Nodes {
 		if n.Name == name {
 			if d := g.Devices[n.DeviceID]; d != nil {
@@ -626,7 +621,10 @@ func (r *RealPipeWire) GetMicMonitoring(ctx context.Context, sourceNode, sinkNod
 	if err != nil {
 		return false, err
 	}
+	return micMonitoring(g, sourceNode, sinkNode), nil
+}
 
+func micMonitoring(g *inspect.Graph, sourceNode, sinkNode string) bool {
 	var sourceID, sinkID int
 	for id, n := range g.Nodes {
 		if n.Name == sourceNode {
@@ -637,13 +635,13 @@ func (r *RealPipeWire) GetMicMonitoring(ctx context.Context, sourceNode, sinkNod
 		}
 	}
 	if sourceID == 0 || sinkID == 0 {
-		return false, nil
+		return false
 	}
 
 	for _, link := range g.Links {
 		if link.OutNode == sourceID && link.InNode == sinkID {
-			return true, nil
+			return true
 		}
 	}
-	return false, nil
+	return false
 }

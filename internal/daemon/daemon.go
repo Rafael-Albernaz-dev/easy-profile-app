@@ -355,8 +355,9 @@ func (d *Daemon) control() error {
 	return nil
 }
 func (d *Daemon) refresh(ctx context.Context) error {
-	graph, graphErr := d.pw.ReadGraphState(ctx, d.hardware.VirtualSink, d.hardware.VirtualSource, d.ctrl.ActiveDestination().PhysicalSinkName, d.hardware.PhysicalMicrophonePrefix)
-	sharingErr := d.readSharing(ctx)
+	observation, observationErr := d.pw.ReadObservation(ctx, d.hardware.VirtualSink, d.hardware.VirtualSource, d.ctrl.ActiveDestination().PhysicalSinkName, d.hardware.PhysicalMicrophonePrefix)
+	graph, graphErr := observation.Graph, observation.GraphError
+	d.setObservedSharing(observation.Sharing)
 	devices, devicesErr := d.ee.ReadDevices(ctx)
 	d.status.PhysicalMicrophone = graph.PhysicalMicrophone
 	d.status.DSPBound = graphErr == nil && devicesErr == nil && graph.PhysicalMicrophone != "" && graph.DefaultSink == d.hardware.VirtualSink && graph.ConfiguredSink == d.hardware.VirtualSink && devices.Input == graph.PhysicalMicrophone && devices.Output == d.ctrl.ActiveDestination().PhysicalSinkName && !devices.UseDefaultInput && !devices.UseDefaultOutput
@@ -365,9 +366,8 @@ func (d *Daemon) refresh(ctx context.Context) error {
 	if e1 == nil {
 		d.presets = presets
 	}
-	raw, e2 := d.pw.GetRawMicStreams(ctx, d.hardware.PhysicalMicrophonePrefix)
-	if e2 == nil {
-		d.status.RawMicStreams = raw
+	if observation.RawMicStreams != nil {
+		d.status.RawMicStreams = observation.RawMicStreams
 	}
 	read := func(name string, p **bool) error {
 		value, err := d.pw.GetNodeMute(ctx, name)
@@ -378,16 +378,14 @@ func (d *Daemon) refresh(ctx context.Context) error {
 		}
 		return err
 	}
-	route, routeErr := d.pw.GetSinkPort(ctx, d.ctrl.ActiveDestination().PhysicalSinkName)
-	d.status.ObservedDestination = route
+	d.status.ObservedDestination = observation.SinkPort
 	preset, presetErr := d.ee.GetActivePreset(ctx)
 	d.status.ObservedPreset = preset
-	mon, monErr := d.pw.GetMicMonitoring(ctx, d.hardware.VirtualSource, d.hardware.VirtualSink)
-	if monErr == nil {
-		d.ctrl.SetMicMonitoring(mon)
-		d.status.MicMonitoring = mon
+	if observation.MicMonitoringKnown {
+		d.ctrl.SetMicMonitoring(observation.MicMonitoring)
+		d.status.MicMonitoring = observation.MicMonitoring
 	}
-	return errors.Join(graphErr, sharingErr, devicesErr, e1, e2, routeErr, presetErr, monErr, read(d.hardware.VirtualSink, &d.status.ObservedOutputMute), read(d.hardware.VirtualSource, &d.status.ObservedMicVirtualMute), read(d.hardware.PhysicalMicrophonePrefix, &d.status.ObservedMicPhysicalMute))
+	return errors.Join(observationErr, devicesErr, e1, presetErr, read(d.hardware.VirtualSink, &d.status.ObservedOutputMute), read(d.hardware.VirtualSource, &d.status.ObservedMicVirtualMute), read(d.hardware.PhysicalMicrophonePrefix, &d.status.ObservedMicPhysicalMute))
 }
 
 // Observe refreshes graph-dependent alerts and observed mutes without modifying hardware.
@@ -889,14 +887,14 @@ func (d *Daemon) Reconcile() *dbus.Error {
 	return d.execute(false, func(ctx context.Context) error {
 		err := d.refresh(ctx)
 		if d.observeOnly {
-			confirmed, confirmErr := d.ee.GetActivePreset(ctx)
-			d.status.ObservedPreset = confirmed
-			return errors.Join(err, confirmErr)
+			return err
 		}
+		repaired := false
 		if d.status.OutputSharingRestorePending || (d.ctrl.OutputSharing() && (err != nil || d.ctrl.PanicState().Active || d.ctrl.MicMonitoring())) {
 			if stopErr := d.stopSharing(ctx); stopErr != nil {
 				return errors.Join(err, stopErr)
 			}
+			repaired = true
 		}
 		if d.status.ObservedDestination != d.ctrl.ActiveDestination().RouteName {
 			return errors.Join(err, d.pw.SetNodeMute(ctx, d.ctrl.ActiveDestination().PhysicalSinkName, true), errors.New("external output route changed; select destination explicitly"))
@@ -915,16 +913,21 @@ func (d *Daemon) Reconcile() *dbus.Error {
 			if repairErr := d.applyDestination(ctx, d.ctrl.ActiveDestination()); repairErr != nil {
 				return errors.Join(err, repairErr)
 			}
+			repaired = true
 		} else if *d.status.ObservedMicVirtualMute != d.ctrl.Microphone().VirtualMuted || *d.status.ObservedMicPhysicalMute != d.ctrl.Microphone().PhysicalMuted || *d.status.ObservedOutputMute != d.ctrl.OutputMuted() {
 			if muteErr := d.applyMutes(ctx); muteErr != nil {
 				return errors.Join(err, muteErr)
 			}
+			repaired = true
 		}
-		active, readErr := d.ee.GetActivePreset(ctx)
-		if readErr != nil || active != d.ctrl.ActiveOutputPreset() {
+		if d.status.ObservedPreset == "" || d.status.ObservedPreset != d.ctrl.ActiveOutputPreset() {
 			if loadErr := d.ee.LoadPreset(ctx, d.ctrl.ActiveOutputPreset()); loadErr != nil {
 				return errors.Join(err, loadErr)
 			}
+			repaired = true
+		}
+		if !repaired {
+			return err
 		}
 		// Return the final readback: a successfully repaired initial mismatch is no longer an error.
 		return d.refresh(ctx)

@@ -1,7 +1,6 @@
 package easyeffects
 
 import (
-	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
@@ -24,7 +23,7 @@ var (
 
 // RealEasyEffects implements adapters.EasyEffectsPort by communicating with EasyEffects 7.1.6
 // via CLI (easyeffects -l), GSettings (com.github.wwmm.easyeffects), and filesystem read of output presets.
-// Invariants: Never modifies preset files (RULES.md §1.3), blocks host execution when EASYPROFILE_TEST_MODE=1.
+// Invariants: Never modifies preset files (docs/RULES.md §1.3), blocks host execution when EASYPROFILE_TEST_MODE=1.
 type RealEasyEffects struct {
 	configDir string
 	timeout   time.Duration
@@ -219,19 +218,13 @@ func (r *RealEasyEffects) Watch(ctx context.Context, events chan<- struct{}) err
 	if err := cmd.Start(); err != nil {
 		return err
 	}
-	scanner := bufio.NewScanner(stdout)
-	for scanner.Scan() {
-		select {
-		case events <- struct{}{}:
-		default:
-		}
-	}
-	if scanner.Err() != nil {
+	readErr := watchSettingsChanges(stdout, events)
+	if readErr != nil {
 		_ = cmd.Process.Kill()
 	}
 	err = cmd.Wait()
 	if ctx.Err() != nil {
 		return ctx.Err()
 	}
-	return errors.Join(scanner.Err(), err)
+	return errors.Join(readErr, err)
 }

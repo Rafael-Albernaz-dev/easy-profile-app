@@ -280,12 +280,8 @@ func runDaemon(args []string, stdout, stderr io.Writer) int {
 			fmt.Fprintln(stderr, "session D-Bus disconnected")
 			return 1
 		case <-events:
-			timer := time.NewTimer(100 * time.Millisecond)
-			select {
-			case <-ctx.Done():
-				timer.Stop()
+			if !waitForReconcileBatch(ctx, events, 100*time.Millisecond) {
 				return 0
-			case <-timer.C:
 			}
 			if err := d.Reconcile(); err != nil {
 				fmt.Fprintln(stderr, "reconciliation:", err)
