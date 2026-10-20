@@ -2,7 +2,7 @@
 
 Personal audio controller for Ubuntu 24.04 / GNOME Shell 46 Wayland, PipeWire 1.0.5, WirePlumber 0.4.17 and EasyEffects 7.1.6. One Go CLI/daemon and a native GJS extension communicate through Session D-Bus (`org.easyprofile.Daemon`).
 
-The calibrated setup uses AKG K52 front headphones, SP166 rear speakers and the KA-1333 USB microphone. Hardware identities, output routes and preset compatibility are configured in `config.example.json`.
+The calibrated setup uses AKG K52 front headphones, SP166 rear speakers and the KA-1333 USB microphone. Hardware identities, output routes and preset compatibility are configured in `configs/config.example.json`.
 
 ## Safety and behavior
 
@@ -15,9 +15,22 @@ The calibrated setup uses AKG K52 front headphones, SP166 rear speakers and the 
 - Raw microphone captures are reported. Migration is explicit per application, rejects ambiguity and confirms processed links.
 - Status reads use an immutable published snapshot, independently of slow hardware operations. UI level requests carry a destination, and route/reset barriers discard pending levels and wait for calls already sent.
 - Microphone monitoring (post-DSP sidetone) creates dedicated PipeWire links from `easyeffects_source` to `easyeffects_sink`. A blue headset panel icon indicates active monitoring, and enabling monitoring automatically un-mutes the microphone if muted.
-- Temporary whole-output sharing replaces one active call capture's microphone with the selected physical output monitor. The menu switch and `share on|off|toggle` restore the previous capture target on stop. Sharing includes notifications and participants' voices; it cannot run together with mic monitoring. Mic mute, panic, Reset and destination selection stop it. See [behavior and human QA](docs/OUTPUT_SHARING.md).
+- Temporary whole-output sharing replaces one active call capture's microphone with the selected physical output monitor. The menu switch and `share on|off|toggle` restore the previous capture target on stop. Sharing includes notifications and participants' voices; it cannot run together with mic monitoring. Mic mute, panic, Reset and destination selection stop it. See [behavior and human QA](docs/features/OUTPUT_SHARING.md).
 
 Automated tests use in-memory audio adapters with `EASYPROFILE_TEST_MODE=1`. No test may control real audio. Production guards and the three calibrated preset files remain untouched during development. Passing local gates does not certify physical routing, sound quality or GNOME Shell behavior.
+
+## System-default input/output in Meet and WhatsApp Web
+
+The intended path for applications using **System default** is:
+
+- Input: physical microphone → EasyEffects input filters → `easyeffects_source` → browser/call.
+- Output: browser playback → `easyeffects_sink` → EasyEffects output filters → selected physical output.
+
+Startup and protected route application already set both virtual endpoints as defaults. Continuous reconciliation currently validates the output defaults; input-default readback and drift repair remain proposed work. `dsp_bound` currently does not confirm both input defaults.
+
+Choose **Default / System default** where the browser or call offers it. If an explicit physical device was saved, select the processed EasyEffects device once or clear that selection. [Chrome](https://support.google.com/chrome/answer/2693767?hl=en) and [Meet](https://support.google.com/meet/answer/10409699?hl=en) provide their own microphone/device choices; OS defaults do not universally override them. WhatsApp Web needs separate call validation.
+
+See the [current behavior, precise gap and proposed implementation](docs/features/SYSTEM_DEFAULT_AUDIO.md). Friendly names alone do not route audio. No automatic forced migration of every browser stream is implemented.
 
 ## Official 17-key keypad contract
 
@@ -125,13 +138,21 @@ The six gates cover formatting/vet/staticcheck/build; Go AST subprocess/file-wri
 
 Measured budgets: parser <5 ms/op; direct status read during blocked hardware <5 ms; fake CLI status p95 <15 ms over 100 samples; fake daemon RSS <15 MB; fake idle CPU <1% of one core over 60 seconds. CLI maximum is reported separately. Real adapters, child processes and GNOME still require accompanied measurement. No aggressive CPU quota is claimed or imposed.
 
+## Reconciliation optimization and current validation limits
+
+Healthy reconciliation reuses one fresh graph observation and avoids redundant preset inspection and unchanged session writes. Repairs still require a new readback; mute observations remain independent. Five equivalent read pairs showed median wall time **889.80 → 218.66 ms** and CPU time **598.51 → 123.99 ms**. These compare read paths, not continuous daemon CPU or DSP cost.
+
+Race tests, static checks, fake installer tests, private D-Bus integration and extension packaging passed. Full gate approval remains pending: the gate still expects legacy guards to be active after the completed cutover, and the fake CLI p95 recheck measured **17.57 ms** against a **15 ms** budget. The isolated parser recheck passed at **4.125 ms/op**. See [scope, measurements and human validation](docs/performance/RECONCILIATION_OPTIMIZATION.md).
+
+Boost remains unimplemented; keypad `9` is reserved and volume remains capped at 100%.
+
 ## Observation and CLI
 
 **Always pass `--observe` for a daemon run without hardware control.** The default is control mode; omitting this flag is not a read-only test.
 
 ```bash
 # Read-only audio observation; do not run alongside an existing daemon owning the lock.
-bin/easyprofilectl daemon --observe --config config.example.json
+bin/easyprofilectl daemon --observe --config configs/config.example.json
 
 # Read-only inspection without starting a daemon
 bin/easyprofilectl inspect
@@ -173,8 +194,17 @@ Development does not authorize executing a real cutover. The installer and rollb
 - After legacy guard deactivation begins, catchable errors/signals trigger rollback. Readiness requires structured JSON health with confirmed protection, no error, DSP bindings and monitor gain confirmed. A received degraded/invalid reply rolls back immediately; only unavailable transport/readiness is retried within a deadline. SIGKILL/power loss cannot execute a shell trap; retain the snapshot for explicit recovery.
 - Rollback removes the D-Bus activation file, stops the new daemon, restores each saved active/enabled state symmetrically and verifies all three preset hashes. Missing/corrupt snapshots are errors; there is no guessed enable/start fallback.
 
-See [the current handoff](docs/EP-004-EP-005-HANDOFF.md) and [architecture requirements](ARCHITECTURE_AND_REQUIREMENTS.md) for validation boundaries and the accompanied QA checklist.
+See [the current handoff](docs/handoffs/EP-004-EP-005-HANDOFF.md) for validation boundaries and the accompanied QA checklist. Local architecture notes live in `docs/ARCHITECTURE_AND_REQUIREMENTS.md` and are intentionally ignored by Git.
 
 ## License
 
 MIT © Rafael Albernaz.
+
+## Repository layout
+
+- `cmd/`: CLI/daemon entry point, source safety auditor and opt-in read-only performance probe.
+- `internal/domain/`: state, policies and invariants; `internal/daemon/`: orchestration and D-Bus; `internal/adapters/`: external audio integrations.
+- `configs/`: example configuration; `presets/`: versioned audio assets.
+- `docs/`: [rules](docs/RULES.md), audits, handoffs, feature contracts and [performance report](docs/performance/RECONCILIATION_OPTIMIZATION.md).
+- `scripts/`, `systemd/`, `gnome-extension/`: operational tooling and desktop integration.
+- `test/fixtures/`: reproducible test inputs. Generated evidence in `docs/evidence/` and compiled schemas stay local and ignored.
