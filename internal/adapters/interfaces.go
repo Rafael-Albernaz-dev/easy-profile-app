@@ -13,6 +13,8 @@ type OutputSharingState struct {
 type GraphState struct {
 	PhysicalMicrophone   string
 	DefaultSink          string
+	DefaultSource        string
+	ConfiguredSource     string
 	ConfiguredSink       string
 	SinkMonitorVolumes   bool
 	SourceMonitorVolumes bool

@@ -119,7 +119,8 @@ O app já estabelece ambos os padrões ao vincular o DSP. Há uma lacuna anterio
 à otimização: `GraphState`/`DSPBound` verificam continuamente apenas os defaults de
 saída; a escrita do padrão de entrada não confirma os dois defaults por readback.
 Uma mudança externa apenas da entrada pode passar sem reparação. Isso ficou
-auditado, não corrigido nesta fatia.
+auditado, não corrigido nesta fatia. A correção posterior está
+descrita em [defaults processados de entrada/saída](../features/SYSTEM_DEFAULT_AUDIO.md).
 
 Nomes como “EasyProfile — Microfone processado” e “EasyProfile — Saída processada”
 facilitariam a seleção humana, preservando os `node.name` usados pelo controlador.

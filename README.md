@@ -11,7 +11,7 @@ The calibrated setup uses AKG K52 front headphones, SP166 rear speakers and the 
 - Panic saves three independent mute booleans. Manual mute overrides update the corresponding saved values. Daily reset preserves the two current microphone mute states.
 - Volumes and compatible presets are remembered per destination and graphical login. Same-login restart restores them. Corrupt, incomplete or missing same-login state refuses automatic default gains/unmute.
 - A process flock is acquired before session loading or hardware initialization. Login authorization is stored atomically before any automatic unmute. Login-marker and audio-state files are separate (`login_session.json` and `session.json`).
-- Background reconciliation maintains the virtual default sink, EasyEffects input/output device selections and monitor gain, using fresh identity/readbacks. KA-1333 resolution checks USB identity/profile. Cached IDs are invalidated on graph changes and failed calls.
+- Background reconciliation maintains effective/configured virtual defaults for both input and output, EasyEffects input/output device selections and monitor gain, using fresh identity/readbacks. KA-1333 resolution checks USB identity/profile. Cached IDs are invalidated on graph changes and failed calls.
 - Raw microphone captures are reported. Migration is explicit per application, rejects ambiguity and confirms processed links.
 - Status reads use an immutable published snapshot, independently of slow hardware operations. UI level requests carry a destination, and route/reset barriers discard pending levels and wait for calls already sent.
 - Microphone monitoring (post-DSP sidetone) creates dedicated PipeWire links from `easyeffects_source` to `easyeffects_sink`. A blue headset panel icon indicates active monitoring, and enabling monitoring automatically un-mutes the microphone if muted.
@@ -26,11 +26,11 @@ The intended path for applications using **System default** is:
 - Input: physical microphone → EasyEffects input filters → `easyeffects_source` → browser/call.
 - Output: browser playback → `easyeffects_sink` → EasyEffects output filters → selected physical output.
 
-Startup and protected route application already set both virtual endpoints as defaults. Continuous reconciliation currently validates the output defaults; input-default readback and drift repair remain proposed work. `dsp_bound` currently does not confirm both input defaults.
+Startup and background reconciliation maintain both virtual endpoints as effective and configured defaults. `dsp_bound` now requires all four default values. Metadata-only changes also trigger reconciliation; repairs confirm fresh readbacks within a bounded deadline and preserve session levels, presets and independent microphone mutes. Healthy reconciliation adds no polling or hardware writes.
 
 Choose **Default / System default** where the browser or call offers it. If an explicit physical device was saved, select the processed EasyEffects device once or clear that selection. [Chrome](https://support.google.com/chrome/answer/2693767?hl=en) and [Meet](https://support.google.com/meet/answer/10409699?hl=en) provide their own microphone/device choices; OS defaults do not universally override them. WhatsApp Web needs separate call validation.
 
-See the [current behavior, precise gap and proposed implementation](docs/features/SYSTEM_DEFAULT_AUDIO.md). Friendly names alone do not route audio. No automatic forced migration of every browser stream is implemented.
+See the [implementation, safety contract and human validation](docs/features/SYSTEM_DEFAULT_AUDIO.md). Friendly names alone do not route audio. No automatic forced migration of every browser stream is implemented.
 
 ## Official 17-key keypad contract
 

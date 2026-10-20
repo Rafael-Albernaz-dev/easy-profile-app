@@ -1,6 +1,6 @@
 # System-default audio through EasyEffects
 
-Status: audited design; existing defaults are configured, but continuous input-default validation is not implemented yet. No browser settings or live audio routes were changed by this audit.
+Status: implemented with hermetic tests; physical browser/call acceptance is pending. No browser settings or live audio routes were changed during development.
 
 ## What “Default” should mean
 
@@ -31,17 +31,15 @@ Configured defaults record the requested preference; effective defaults describe
 
 EasyEffects itself must use the physical KA-1333 input and the selected physical output explicitly, rather than follow its own virtual defaults. This avoids routing the processed endpoints back into themselves. The daemon already enforces those explicit EasyEffects device selections.
 
-## Current code and the missing protection
+## Implementation and safety contract
 
-`internal/daemon/daemon.go: ensureDSPBindings` calls both `EnsureDefaultSink` and `EnsureDefaultSource` during startup and protected destination application. `internal/adapters/pipewire/graph_state.go` implements those operations.
+`internal/adapters/pipewire/graph_state.go` includes the effective and configured defaults for both input and output in the existing fresh graph observation. `internal/daemon/daemon.go` requires all four values, explicit physical EasyEffects device selections and resolved endpoints before reporting `dsp_bound=true`.
 
-The sink operation confirms both metadata values with a fresh graph. The source operation currently writes the configured source but does not verify the effective result afterwards. `GraphState` and the daemon's `DSPBound` check currently include only the two sink-default values. An external change affecting only the input default can therefore escape background repair. Current `dsp_bound=true` must not be interpreted as confirmation of all four defaults.
+`internal/adapters/pipewire/defaults.go` selects the defaults and confirms both values afterwards. A healthy selection uses one read and performs no writes. Repairs use fresh snapshots, retrying convergence at 50 ms intervals within the adapter's configured timeout (3 seconds by default), also respecting parent cancellation. Missing/ambiguous/wrong-class endpoints, read failures, failed writes or an expired deadline cannot be reported as confirmed. Sink selection uses the freshly resolved node ID rather than a cached ID. Source metadata is JSON-encoded with explicit `Spa:String:JSON` type, following the [PipeWire metadata CLI](https://docs.pipewire.org/page_man_pw-metadata_1.html).
 
-The proposed next implementation is:
+`internal/adapters/pipewire/watch.go` wakes the existing reconciler for effective/configured default metadata changes and deletions, including changes without any Node/Link/Device event. Default-metadata creation/removal and graph/cache invalidation also remain wakeups. Events are coalesced; deltas never replace a fresh observation. There is no new polling loop while defaults are healthy.
 
-1. Add effective/configured input defaults to the existing fresh graph observation and require all four default values in DSP binding validation. Use the consolidated snapshot; do not add continuous polling or a second parser.
-2. Make the source-default setter confirm both input metadata values after selection, with a bounded deadline for WirePlumber convergence. Missing nodes, unknown observations or a timeout must report degraded protection, never successful binding.
-3. Use the existing serialized, protected repair sequence on default drift and node recreation. Preserve all mute states, session levels and presets; background repair must never authorize a new microphone unmute. Cover source-only drift, configured/effective disagreement, failed repair, startup, node recreation and healthy no-op reconciliation with fakes.
+Default drift uses the existing serialized, protected destination repair. It preserves session levels, presets, panic and independent microphone mute states. It never authorizes a new microphone unmute in the background. A failed repair keeps physical output muted and protection unconfirmed. A partial microphone mute remains visible as `degraded_partial_mute`; successful DSP binding does not hide that privacy state. Observe-only mode reports drift without changing defaults.
 
 Friendly descriptions such as “EasyProfile — Processed microphone” and “EasyProfile — Processed output” are optional follow-up work. Stable `node.name` identifiers must remain unchanged. Renaming requires checking propagation through PipeWire-Pulse/browser enumeration and restoration after node recreation.
 
@@ -57,7 +55,7 @@ WhatsApp Web must be tested independently in the installed browser; no universal
 
 ## Human acceptance checklist
 
-After implementing the proposed protection, validate on the actual desktop:
+With the new binary loaded, validate on the actual desktop:
 
 - Fresh login with EasyEffects endpoints present, and startup where they appear later.
 - Chrome and Meet using the system default: confirm both processed capture and processed playback links, not just the device label or a moving level meter.
@@ -67,3 +65,9 @@ After implementing the proposed protection, validate on the actual desktop:
 - Muted microphone, panic, output sharing and preset changes retain their privacy/routing contracts. Preset hashes remain unchanged.
 
 This checklist is pending physical acceptance; documentation, fake tests and metadata alone do not certify what a remote participant hears.
+
+## Verification for this slice
+
+Hermetic coverage includes all four default drifts; both directions of configured/effective disagreement; asynchronous convergence, deadline and cancellation; missing, invalid and ambiguous nodes; selection/read errors; metadata-only changes and deletion; watcher cache invalidation; observe-only behavior; failed readback after a successful setter; independent microphone mutes; session volume/preset preservation; panic and recovery after endpoint recreation. The existing healthy-reconciliation test still requires one observation and zero hardware writes.
+
+Live read-only inspection confirmed all four defaults already point to the EasyEffects endpoints and that their media classes match the adapter contract. This does not prove behavior in a real call or recovery from an injected live fault. The prior full-gate limitations remain: legacy-guard expectations after cutover and the recorded fake CLI latency budget. No live fault was injected and no audio service was restarted during development.

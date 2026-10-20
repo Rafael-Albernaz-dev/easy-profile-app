@@ -162,6 +162,8 @@ func TestReconcileRestoresGraphAndMonitorGainWithoutUnmutingMic(t *testing.T) {
 	pw.MonitorChannelVolumes[VirtualSourceNode] = false
 	pw.DefaultSink = PhysicalSinkNode
 	pw.ConfiguredSink = PhysicalSinkNode
+	pw.DefaultSource = pw.PhysicalMicrophone
+	pw.ConfiguredSource = pw.PhysicalMicrophone
 	pw.PhysicalMicrophone = "alsa_input.usb-MU900_KA-1333_20190805V001-00.iec958-stereo.4"
 	ee.Devices.Input = "stale-device"
 	ee.Devices.Output = "wrong-output"
@@ -174,7 +176,7 @@ func TestReconcileRestoresGraphAndMonitorGainWithoutUnmutingMic(t *testing.T) {
 	if !s.DSPBound || !s.MonitorVolumesConfirmed || s.ProtectionState != "confirmed" {
 		t.Fatalf("false protection: %+v", s)
 	}
-	if !pw.MonitorChannelVolumes[VirtualSinkNode] || !pw.MonitorChannelVolumes[VirtualSourceNode] || pw.DefaultSink != VirtualSinkNode || ee.Devices.Input != pw.PhysicalMicrophone || ee.Devices.Output != PhysicalSinkNode || ee.Devices.UseDefaultInput || ee.Devices.UseDefaultOutput {
+	if !pw.MonitorChannelVolumes[VirtualSinkNode] || !pw.MonitorChannelVolumes[VirtualSourceNode] || pw.DefaultSink != VirtualSinkNode || pw.DefaultSource != VirtualSourceNode || pw.ConfiguredSource != VirtualSourceNode || ee.Devices.Input != pw.PhysicalMicrophone || ee.Devices.Output != PhysicalSinkNode || ee.Devices.UseDefaultInput || ee.Devices.UseDefaultOutput {
 		t.Fatal("DSP graph not repaired")
 	}
 	if !pw.NodeMutes[VirtualSourceNode] || !pw.NodeMutes[PhysicalMicPrefix] {

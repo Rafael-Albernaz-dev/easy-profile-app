@@ -82,3 +82,20 @@ func TestGraphAndDefaultOperationsCannotEscapeTestMode(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func TestGraphStateIncludesEffectiveAndConfiguredInputAndOutput(t *testing.T) {
+	g := observationFixture(t)
+	g.Defaults["default.audio.source"] = "effective-input"
+	g.Defaults["default.configured.audio.source"] = "configured-input"
+	g.Defaults["default.audio.sink"] = "effective-output"
+	g.Defaults["default.configured.audio.sink"] = "configured-output"
+	state, err := graphState(g, "easyeffects_sink", "easyeffects_source", "alsa_output.pci-0000_00_1f.3.analog-stereo", "alsa_input.usb-MU900_KA-1333")
+	if err != nil || state.DefaultSource != "effective-input" || state.ConfiguredSource != "configured-input" || state.DefaultSink != "effective-output" || state.ConfiguredSink != "configured-output" {
+		t.Fatalf("default values lost or confused: %+v %v", state, err)
+	}
+	delete(g.Defaults, "default.audio.source")
+	state, err = graphState(g, "easyeffects_sink", "easyeffects_source", "alsa_output.pci-0000_00_1f.3.analog-stereo", "alsa_input.usb-MU900_KA-1333")
+	if err != nil || state.DefaultSource != "" || state.ConfiguredSource != "configured-input" {
+		t.Fatal("missing effective default fabricated from configured value", state, err)
+	}
+}

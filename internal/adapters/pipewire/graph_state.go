@@ -4,8 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"os/exec"
-	"strconv"
 	"strings"
 
 	"github.com/toru/easy-profile-app/internal/adapters"
@@ -37,7 +35,12 @@ func resolveMicrophone(g *inspect.Graph, prefix string) (*inspect.NodeInfo, erro
 }
 
 func graphState(g *inspect.Graph, sink, source, physicalSink, micPrefix string) (adapters.GraphState, error) {
-	state := adapters.GraphState{DefaultSink: g.Defaults["default.audio.sink"], ConfiguredSink: g.Defaults["default.configured.audio.sink"]}
+	state := adapters.GraphState{
+		DefaultSink:      g.Defaults["default.audio.sink"],
+		ConfiguredSink:   g.Defaults["default.configured.audio.sink"],
+		DefaultSource:    g.Defaults["default.audio.source"],
+		ConfiguredSource: g.Defaults["default.configured.audio.source"],
+	}
 	mic, err := resolveMicrophone(g, micPrefix)
 	if err != nil {
 		return state, err
@@ -69,56 +72,4 @@ func (r *RealPipeWire) ReadGraphState(ctx context.Context, sink, source, physica
 		return adapters.GraphState{}, err
 	}
 	return graphState(g, sink, source, physicalSink, micPrefix)
-}
-
-func (r *RealPipeWire) EnsureDefaultSink(ctx context.Context, sink string) error {
-	if err := r.checkTestMode(); err != nil {
-		return err
-	}
-	ctx, cancel := context.WithTimeout(ctx, r.timeout)
-	defer cancel()
-	g, err := r.graph(ctx)
-	if err != nil {
-		return err
-	}
-	if g.Defaults["default.audio.sink"] == sink && g.Defaults["default.configured.audio.sink"] == sink {
-		return nil
-	}
-	id, err := r.FindNodeID(ctx, sink)
-	if err != nil {
-		return err
-	}
-	if out, err := exec.CommandContext(ctx, "wpctl", "set-default", strconv.Itoa(id)).CombinedOutput(); err != nil {
-		r.InvalidateCache()
-		return fmt.Errorf("set DSP default sink: %w: %s", err, out)
-	}
-	g, err = r.graph(ctx)
-	if err != nil {
-		return err
-	}
-	if g.Defaults["default.audio.sink"] != sink || g.Defaults["default.configured.audio.sink"] != sink {
-		return errors.New("default DSP sink readback mismatch")
-	}
-	return nil
-}
-
-func (r *RealPipeWire) EnsureDefaultSource(ctx context.Context, source string) error {
-	if err := r.checkTestMode(); err != nil {
-		return err
-	}
-	ctx, cancel := context.WithTimeout(ctx, r.timeout)
-	defer cancel()
-	g, err := r.graph(ctx)
-	if err != nil {
-		return err
-	}
-	if g.Defaults["default.audio.source"] == source && g.Defaults["default.configured.audio.source"] == source {
-		return nil
-	}
-	val := fmt.Sprintf(`{"name":"%s"}`, source)
-	if out, err := exec.CommandContext(ctx, "pw-metadata", "-n", "default", "0", "default.configured.audio.source", val).CombinedOutput(); err != nil {
-		r.InvalidateCache()
-		return fmt.Errorf("set DSP default source: %w: %s", err, out)
-	}
-	return nil
 }

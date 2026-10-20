@@ -360,7 +360,11 @@ func (d *Daemon) refresh(ctx context.Context) error {
 	d.setObservedSharing(observation.Sharing)
 	devices, devicesErr := d.ee.ReadDevices(ctx)
 	d.status.PhysicalMicrophone = graph.PhysicalMicrophone
-	d.status.DSPBound = graphErr == nil && devicesErr == nil && graph.PhysicalMicrophone != "" && graph.DefaultSink == d.hardware.VirtualSink && graph.ConfiguredSink == d.hardware.VirtualSink && devices.Input == graph.PhysicalMicrophone && devices.Output == d.ctrl.ActiveDestination().PhysicalSinkName && !devices.UseDefaultInput && !devices.UseDefaultOutput
+	d.status.DSPBound = graphErr == nil && devicesErr == nil && graph.PhysicalMicrophone != "" &&
+		graph.DefaultSink == d.hardware.VirtualSink && graph.ConfiguredSink == d.hardware.VirtualSink &&
+		graph.DefaultSource == d.hardware.VirtualSource && graph.ConfiguredSource == d.hardware.VirtualSource &&
+		devices.Input == graph.PhysicalMicrophone && devices.Output == d.ctrl.ActiveDestination().PhysicalSinkName &&
+		!devices.UseDefaultInput && !devices.UseDefaultOutput
 	d.status.MonitorVolumesConfirmed = graphErr == nil && graph.SinkMonitorVolumes && graph.SourceMonitorVolumes
 	presets, e1 := d.ee.ListAvailablePresets(ctx)
 	if e1 == nil {

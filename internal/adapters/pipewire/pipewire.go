@@ -3,7 +3,6 @@ package pipewire
 import (
 	"bytes"
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -440,53 +439,15 @@ func (r *RealPipeWire) Watch(ctx context.Context, events chan<- struct{}) error 
 	if err := cmd.Start(); err != nil {
 		return err
 	}
-	decoder := json.NewDecoder(stdout)
-	types := map[int]string{}
-	for {
-		var event []struct {
-			ID   int             `json:"id"`
-			Type string          `json:"type"`
-			Info json.RawMessage `json:"info"`
-		}
-		err = decoder.Decode(&event)
-		if err != nil {
-			break
-		}
-		relevant := false
-		for _, obj := range event {
-			kind := obj.Type
-			if kind == "" {
-				kind = types[obj.ID]
-			}
-			if obj.Type != "" {
-				types[obj.ID] = kind
-			}
-			isAudioObject := strings.HasSuffix(kind, ":Node") || strings.HasSuffix(kind, ":Link") || strings.HasSuffix(kind, ":Device")
-			if isAudioObject || (kind == "" && string(obj.Info) == "null") {
-				relevant = true
-			}
-			if (strings.HasSuffix(kind, ":Node") || strings.HasSuffix(kind, ":Device") || kind == "") && string(obj.Info) == "null" {
-				r.invalidateObject(obj.ID)
-			}
-			if string(obj.Info) == "null" {
-				delete(types, obj.ID)
-			}
-		}
-		if relevant {
-			select {
-			case events <- struct{}{}:
-			default:
-			}
-		}
-	}
-	if err != nil && err != io.EOF {
+	err = r.watchGraphEvents(stdout, events)
+	if err != io.EOF {
 		_ = cmd.Process.Kill()
 	}
 	waitErr := cmd.Wait()
 	if ctx.Err() != nil {
 		return ctx.Err()
 	}
-	if err != nil && err != io.EOF {
+	if err != io.EOF {
 		return err
 	}
 	return waitErr

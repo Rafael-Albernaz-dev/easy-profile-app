@@ -23,6 +23,8 @@ type FakePipeWire struct {
 	SetMuteErr            error
 	SetPortErr            error
 	DefaultSink           string
+	DefaultSource         string
+	ConfiguredSource      string
 	ConfiguredSink        string
 	PhysicalMicrophone    string
 	GraphErr              error
@@ -80,6 +82,8 @@ func NewFakePipeWire() *FakePipeWire {
 	return &FakePipeWire{
 		MonitorChannelVolumes: map[string]bool{"easyeffects_sink": true, "easyeffects_source": true},
 		DefaultSink:           "easyeffects_sink",
+		DefaultSource:         "easyeffects_source",
+		ConfiguredSource:      "easyeffects_source",
 		ConfiguredSink:        "easyeffects_sink",
 		PhysicalMicrophone:    "alsa_input.usb-MU900_KA-1333_20190805V001-00.iec958-stereo.3",
 		NodeVolumes:           make(map[string]float64),
@@ -91,7 +95,7 @@ func NewFakePipeWire() *FakePipeWire {
 func (f *FakePipeWire) ReadGraphState(ctx context.Context, sink, source, physicalSink, micPrefix string) (adapters.GraphState, error) {
 	f.mu.RLock()
 	defer f.mu.RUnlock()
-	return adapters.GraphState{PhysicalMicrophone: f.PhysicalMicrophone, DefaultSink: f.DefaultSink, ConfiguredSink: f.ConfiguredSink,
+	return adapters.GraphState{PhysicalMicrophone: f.PhysicalMicrophone, DefaultSink: f.DefaultSink, ConfiguredSink: f.ConfiguredSink, DefaultSource: f.DefaultSource, ConfiguredSource: f.ConfiguredSource,
 		SinkMonitorVolumes: f.MonitorChannelVolumes[sink], SourceMonitorVolumes: f.MonitorChannelVolumes[source]}, f.GraphErr
 }
 
@@ -112,6 +116,7 @@ func (f *FakePipeWire) EnsureDefaultSource(ctx context.Context, source string) e
 	if f.DefaultErr != nil {
 		return f.DefaultErr
 	}
+	f.DefaultSource, f.ConfiguredSource = source, source
 	f.Calls = append(f.Calls, "EnsureDefaultSource:"+source)
 	return nil
 }
