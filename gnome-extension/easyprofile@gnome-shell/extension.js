@@ -804,7 +804,9 @@ export default class EasyProfileExtension extends Extension {
                     }
                 });
             }},
-            {name: 'shortcut-noop-8', flags: noRepeat, handler: () => {}},
+            {name: 'shortcut-noop-8', flags: noRepeat, handler: () => {
+                this._callDBus('ToggleOutputSharing', []);
+            }},
             {name: 'shortcut-noop-9', flags: noRepeat, handler: () => {}},
         ];
 

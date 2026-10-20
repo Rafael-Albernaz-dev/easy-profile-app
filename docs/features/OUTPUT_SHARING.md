@@ -109,3 +109,9 @@ em `/tmp/easyprofile-sharing-install-t55hdrb_`. Hash do binário e bytes da exte
 proxy, metadata e schema compilado foram conferidos. O PID do daemon permaneceu
 igual durante a instalação: a nova versão será carregada no próximo login gráfico.
 Não houve restart de serviço nem ativação da feature em áudio real nesta entrega.
+
+## Atalho Numpad 8
+
+Com NumLock no modo áudio, `8` chama `ToggleOutputSharing`, com
+`IGNORE_AUTOREPEAT`. O botão do menu e `share on|off|toggle` continuam disponíveis.
+O mesmo toggle encerra uma sessão ativa ou tenta concluir uma restauração pendente.

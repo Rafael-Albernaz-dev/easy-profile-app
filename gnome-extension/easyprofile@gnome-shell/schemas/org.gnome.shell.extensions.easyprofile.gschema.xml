@@ -70,7 +70,7 @@
     </key>
     <key name="shortcut-noop-8" type="as">
       <default><![CDATA[['KP_8']]]></default>
-      <summary>No-Op Silencioso 8</summary>
+      <summary>Alternar compartilhamento de toda a saída na chamada</summary>
     </key>
     <key name="shortcut-noop-9" type="as">
       <default><![CDATA[['KP_9']]]></default>
