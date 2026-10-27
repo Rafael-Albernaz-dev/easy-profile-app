@@ -4,6 +4,17 @@ Personal audio controller for Ubuntu 24.04 / GNOME Shell 46 Wayland, PipeWire 1.
 
 The calibrated setup uses AKG K52 front headphones, SP166 rear speakers and the KA-1333 USB microphone. Hardware identities, output routes and preset compatibility are configured in `configs/config.example.json`.
 
+## Current Status & Milestone Closure (v2 MVP)
+
+The project has reached its operational milestone and is currently in active production use:
+- **Core Orchestration (EP-001 – EP-006):** Cutover executed successfully. The `easyprofiled.service` daemon actively orchestrates session persistence, physical sink routing, post-DSP microphone control, and EasyEffects integration. Legacy guard services have been superseded.
+- **Keypad & Desktop Control:** Full 17-key keypad contract (`⚡` audio mode via `NumLock`) and native GNOME Shell 46 extension top bar indicator, volume sliders, preset selectors, and panic controls are operational.
+- **Calibrated Presets:** 10 versioned EasyEffects presets for AKG K52 and SP166 are listening-tested and active.
+- **Output Sharing (`8`):** Live acceptance confirmed for local playback (tested and verified with VLC during live calls). In-browser playback routing remains an accepted limitation due to browser-level AEC (acoustic echo cancellation).
+- **Output Boost (`9`):** Implemented with LSP limiter protection and automatic level clamping to 100% on reset/disable.
+- **Push-to-Talk (PTT):** The experimental modal grab implementation is deferred and disabled (`OFF`). Non-modal keyboard tracking is slated for future review.
+- **Backlog:** Advanced dynamic equalizers (EP-POST-001) and contextual audio classification (EP-POST-002) remain in the post-MVP backlog.
+
 ## Safety and behavior
 
 - Output route changes mute the physical sink and both ALSA pins before switching. The inactive pin stays muted; the active route receives its calibrated physical ceiling (AKG ≤97%, SP166 ≤100%). Hardware is released only after readbacks succeed.
@@ -186,17 +197,17 @@ easyprofilectl reset
 
 The systemd daemon requires a trustworthy graphical identity (`XDG_SESSION_ID` or `SESSION_MANAGER`) in its environment; stable Wayland/bus socket paths cannot authorize login unmute. `XDG_RUNTIME_DIR` supplies the process lock and separate state files. Lifecycle/configuration methods are not exported on D-Bus. The UI uses `SetVolumeForDestination`; stale destinations are rejected inside the worker.
 
-## Installation and rollback
+## Production Deployment & Rollback
 
-Development does not authorize executing a real cutover. The installer and rollback are prepared for a separately authorized production session:
+The production cutover has been executed, with `easyprofiled.service` active and legacy guard services safely superseded:
 
-- `scripts/install.sh --dry-run` reads hashes and service states without builds, writes or snapshot replacement.
-- A real install atomically creates an immutable rollback point. Existing snapshots cause refusal before installation; never delete one blindly to retry.
-- An already active EasyProfile service is preserved and causes refusal before installation; this script is not a hot upgrade path.
-- After legacy guard deactivation begins, catchable errors/signals trigger rollback. Readiness requires structured JSON health with confirmed protection, no error, DSP bindings and monitor gain confirmed. A received degraded/invalid reply rolls back immediately; only unavailable transport/readiness is retried within a deadline. SIGKILL/power loss cannot execute a shell trap; retain the snapshot for explicit recovery.
-- Rollback removes the D-Bus activation file, stops the new daemon, restores each saved active/enabled state symmetrically and verifies all three preset hashes. Missing/corrupt snapshots are errors; there is no guessed enable/start fallback.
+- `scripts/install.sh --dry-run` inspects hashes and service states without modifications.
+- Real installations atomically create an immutable rollback snapshot. Existing snapshots prevent accidental overwriting.
+- The active EasyProfile daemon preserves state and avoids destructive re-installation loops.
+- Health checks require structured JSON status confirming hardware protection, lack of errors, valid DSP bindings, and calibrated monitor gains.
+- The rollback mechanism (`scripts/rollback.sh`) can stop the daemon, remove the D-Bus activation service, restore legacy services symmetrically, and verify the SHA-256 integrity of all calibrated preset files.
 
-See [the current handoff](docs/handoffs/EP-004-EP-005-HANDOFF.md) for validation boundaries and the accompanied QA checklist. Local architecture notes live in `docs/ARCHITECTURE_AND_REQUIREMENTS.md` and are intentionally ignored by Git.
+Local architecture notes live in `docs/ARCHITECTURE_AND_REQUIREMENTS.md` and are intentionally ignored by Git.
 
 ## License
 
@@ -213,11 +224,7 @@ MIT © Rafael Albernaz.
 
 ### Push-to-talk and operational impact
 
-With NumLock audio mode on, hold `/` for 3 seconds to enter PTT; hold `0` to speak
-and release to mute. Tap `/` again to exit, leaving the microphone muted.
-The menu and `ptt on|off` expose the same mode. On GNOME 46 a temporary keyboard
-grab tracks releases; other keys do not reach applications during a hold.
-See [privacy, deadlines and acceptance](docs/features/PUSH_TO_TALK.md).
+With NumLock audio mode on, `/` was designed as an entry point for PTT with `0` as hold-to-speak. In live testing on GNOME 46 Wayland, the temporary modal keyboard grab interfered with desktop interaction. Consequently, PTT remains disabled (`OFF`) by default while non-modal alternatives are considered for future releases. See [privacy, deadlines and acceptance](docs/features/PUSH_TO_TALK.md).
 
 The [operational performance gate](docs/performance/OPERATIONAL_QUALITY_GATE.md)
 uses a 75-point floor and 80-point target with explicit measurements and hard
