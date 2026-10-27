@@ -13,16 +13,16 @@ func TestBoostUnlockPresetRoutesResetAndMicrophoneSafety(t *testing.T) {
 	if active, err := d.ToggleOutputBoost(); err != nil || !active {
 		t.Fatal(active, err)
 	}
-	if s := statusOf(t, d); s.OutputVolume != 100 || s.OutputMaxPercent != 112 || !s.OutputBoost {
+	if s := statusOf(t, d); s.OutputVolume != 100 || s.OutputMaxPercent != 150 || !s.OutputBoost {
 		t.Fatal("unlock changed level", s)
 	}
-	if n, err := d.SetVolumeAbsolute(150); err != nil || n != 112 {
+	if n, err := d.SetVolumeAbsolute(150); err != nil || n != 150 {
 		t.Fatal(n, err)
 	}
-	if pw.NodeVolumes[VirtualSinkNode] != 1 || ee.BoostPercent != 112 {
+	if pw.NodeVolumes[VirtualSinkNode] != 1 || ee.BoostPercent != 150 {
 		t.Fatal("gain misplaced", pw.NodeVolumes, ee.BoostPercent)
 	}
-	if n, err := d.SetMicVolumeAbsolute(112); err != nil || n != 100 {
+	if n, err := d.SetMicVolumeAbsolute(150); err != nil || n != 100 {
 		t.Fatal("mic exceeded ceiling", n, err)
 	}
 	if _, err := d.ToggleMicMute(); err != nil {
@@ -31,7 +31,7 @@ func TestBoostUnlockPresetRoutesResetAndMicrophoneSafety(t *testing.T) {
 	if err := d.SelectPreset("AKG K52 - Rock e Metal"); err != nil {
 		t.Fatal(err)
 	}
-	if !ee.BoostEnabled || statusOf(t, d).OutputVolume != 112 {
+	if !ee.BoostEnabled || statusOf(t, d).OutputVolume != 150 {
 		t.Fatal("preset cleared Boost")
 	}
 	if err := d.SelectDestination("sp166"); err != nil {
@@ -43,7 +43,7 @@ func TestBoostUnlockPresetRoutesResetAndMicrophoneSafety(t *testing.T) {
 	if err := d.SelectDestination("akg"); err != nil {
 		t.Fatal(err)
 	}
-	if ee.BoostPercent != 112 || statusOf(t, d).OutputVolume != 112 {
+	if ee.BoostPercent != 150 || statusOf(t, d).OutputVolume != 150 {
 		t.Fatal("route lost Boost level")
 	}
 	if _, err := d.TogglePanic(); err != nil {
@@ -97,12 +97,27 @@ func TestBoostLevelFailureMutesOutputButObserveOnlyNeverWrites(t *testing.T) {
 		t.Fatal(err)
 	}
 	pw.SetVolumeErr = errors.New("volume readback failed after extra gain")
-	if _, err := d.SetVolumeAbsolute(112); err == nil || !pw.NodeMutes[PhysicalSinkNode] {
+	if _, err := d.SetVolumeAbsolute(90); err == nil || !pw.NodeMutes[PhysicalSinkNode] {
 		t.Fatal("gain failure did not mute physical output")
 	}
 	d.SetObserveOnly(true)
 	before := len(pw.Calls)
-	if _, err := d.SetVolumeAbsolute(112); err == nil || len(pw.Calls) != before {
+	if _, err := d.SetVolumeAbsolute(150); err == nil || len(pw.Calls) != before {
 		t.Fatal("observe-only fallback wrote hardware")
+	}
+}
+
+func TestBoostStatusCannotConfirmSettingsWithoutNativeDSP(t *testing.T) {
+	d, _, _, ee := setupTestDaemon(t)
+	if _, err := d.SetOutputBoost(true); err != nil {
+		t.Fatal(err)
+	}
+	ee.ValidateDSPErr = errors.New("native limiter disconnected")
+	if err := d.Observe(); err == nil {
+		t.Fatal("native DSP loss accepted")
+	}
+	s := statusOf(t, d)
+	if s.OutputBoostConfirmed || s.DSPBound || s.LastError == "" {
+		t.Fatal("settings incorrectly confirmed DSP", s)
 	}
 }

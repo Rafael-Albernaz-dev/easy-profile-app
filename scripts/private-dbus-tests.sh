@@ -78,9 +78,11 @@ RESULT="$("${CTL}" status --json)"
 rg -q '"output_sharing":false' <<< "${RESULT}"
 "${CTL}" share on
 "${CTL}" share off
+"${CTL}" ptt on
+"${CTL}" ptt off
 "${CTL}" boost on
-RESULT="$("${CTL}" volume 112)"
-rg -q '112%' <<< "${RESULT}"
+RESULT="$("${CTL}" volume 150)"
+rg -q '150%' <<< "${RESULT}"
 RESULT="$("${CTL}" status --json)"
 rg -q '"output_boost":true' <<< "${RESULT}"
 "${CTL}" boost off

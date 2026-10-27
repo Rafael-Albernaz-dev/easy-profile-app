@@ -34,7 +34,7 @@ func runBoost(args []string, stdout, stderr io.Writer) int {
 		return 1
 	}
 	if active {
-		fmt.Fprintln(stdout, "Output Boost ON — ceiling 112%; current level unchanged.")
+		fmt.Fprintln(stdout, "Output Boost ON — ceiling 150%; current level unchanged.")
 	} else {
 		fmt.Fprintln(stdout, "Output Boost OFF — ceiling 100%; extra output gain removed.")
 	}

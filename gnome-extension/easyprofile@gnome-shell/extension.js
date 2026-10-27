@@ -25,6 +25,7 @@ export default class EasyProfileExtension extends Extension {
         this._barrierBusy = false;
         this._settings = this.getSettings();
         this._keybindingKeys = [];
+        this._talkSequence = 0;
         this._status = null;
         this._targetChannel = 'out';
         this._updatingSliders = false;
@@ -40,6 +41,9 @@ export default class EasyProfileExtension extends Extension {
     }
 
     disable() {
+        this._endKeyHold();
+        if (this._status?.push_to_talk && typeof this._proxy?.SetPushToTalkRemote === 'function')
+            this._proxy.SetPushToTalkRemote(false, () => {}, null);
         this._enabled = false;
         this._generation++;
         this._cancellable?.cancel();
@@ -77,7 +81,7 @@ export default class EasyProfileExtension extends Extension {
         this._status = null;
         for (const field of ['_box', '_icon', '_label', '_muteBadge', '_micMuteBadge', '_listenBadge', '_menu',
             '_routeBox', '_btnAKG', '_btnSP166', '_volItem', '_volIcon', '_volSlider',
-            '_btnMuteOut', '_micItem', '_micIcon', '_micSlider', '_btnMuteMic', '_micListenItem', '_shareItem', '_boostItem',
+            '_btnMuteOut', '_micItem', '_micIcon', '_micSlider', '_btnMuteMic', '_micListenItem', '_shareItem', '_boostItem', '_pttItem',
             '_presetsSubMenu', '_warningBanner', '_rawStreamMenu']) this[field] = null;
         this._keymap = null;
     }
@@ -223,11 +227,18 @@ export default class EasyProfileExtension extends Extension {
             this._setOutputSharing(enabled);
         });
         this._menu.addMenuItem(this._shareItem);
-        this._boostItem = new PopupMenu.PopupSwitchMenuItem('Boost da saída (até 112%) [9]', false);
+        this._boostItem = new PopupMenu.PopupSwitchMenuItem('Boost da saída (até 150%) [9]', false);
         this._boostItem.connect('toggled', (_item, enabled) => {
             if (!this._updatingBoost) this._callDBus('SetOutputBoost', [enabled]);
         });
         this._menu.addMenuItem(this._boostItem);
+        this._pttItem = new PopupMenu.PopupSwitchMenuItem('Push-to-talk: segure 0 para falar [/ 3s]', false);
+        this._pttItem.connect('toggled', (_item, enabled) => {
+            if (this._updatingPTT) return;
+            this._endKeyHold();
+            this._callDBus('SetPushToTalk', [enabled]);
+        });
+        this._menu.addMenuItem(this._pttItem);
 
 
         this._menu.addMenuItem(new PopupMenu.PopupSeparatorMenuItem());
@@ -293,10 +304,12 @@ export default class EasyProfileExtension extends Extension {
         if (this._presetsSubMenu) this._presetsSubMenu.reactive = connected;
         if (this._shareItem) this._shareItem.reactive = connected;
         if (this._boostItem) this._boostItem.reactive = connected;
+        if (this._pttItem) this._pttItem.reactive = connected;
         if (this._restartItem?.label?.set_text) {
             this._restartItem.label.set_text(connected ? '🔄 Reiniciar EasyProfile' : '⚡ Forçar Ativação do EasyProfile');
         }
         if (!connected) {
+            this._endKeyHold();
             this._invalidateLevels();
             this._barriers = [];
             this._status = null;
@@ -447,6 +460,11 @@ export default class EasyProfileExtension extends Extension {
                 this._boostItem.setToggleState(Boolean(s.output_boost));
                 this._updatingBoost = false;
             }
+            if (this._pttItem) {
+                this._updatingPTT = true;
+                this._pttItem.setToggleState(Boolean(s.push_to_talk));
+                this._updatingPTT = false;
+            }
             // 5. Update Presets Submenu
             this._presetsSubMenu.menu.removeAll();
             for (const presetName of s.available_presets || []) {
@@ -497,13 +515,14 @@ export default class EasyProfileExtension extends Extension {
         const numLockOn = this._keymap ? Boolean(this._keymap.get_num_lock_state()) : false;
         const modeMarker = numLockOn ? '⚡' : '';
         const observeMarker = this._status.observe_only ? ' (observação)' : '';
-        const boostMarker = this._status.output_boost ? ' • BOOST' : '';
+        const boostMarker = this._status.output_boost ? (this._status.output_boost_confirmed === false ? (this._status.output_dsp_idle ? ' • BOOST AGUARDANDO ÁUDIO' : ' • BOOST NÃO CONFIRMADO') : ' • BOOST') : '';
+        const talkMarker = this._status.push_to_talk ? (this._status.talk_pressed ? ' • PTT FALANDO' : ' • PTT MUTADO') : '';
         const shareMarker = this._status.output_sharing ? ' • COMPARTILHANDO' :
             (this._status.output_sharing_restore_pending ? ' • RESTAURAR ENTRADA' : '');
         if (numLockOn && this._targetChannel === 'mic') {
-            this._label.set_text(`${modeMarker}MIC ${this._displayLevel('mic')}%${observeMarker}${boostMarker}${shareMarker}`);
+            this._label.set_text(`${modeMarker}MIC ${this._displayLevel('mic')}%${observeMarker}${boostMarker}${shareMarker}${talkMarker}`);
         } else {
-            this._label.set_text(`${modeMarker}${destShort} ${this._displayLevel('out')}%${observeMarker}${boostMarker}${shareMarker}`);
+            this._label.set_text(`${modeMarker}${destShort} ${this._displayLevel('out')}%${observeMarker}${boostMarker}${shareMarker}${talkMarker}`);
         }
     }
 
@@ -550,12 +569,14 @@ export default class EasyProfileExtension extends Extension {
     }
 
     _callDBus(method, args, done = null) {
+        if (['SelectDestination', 'ToggleDestination', 'ResetDefaults'].includes(method)) this._endKeyHold();
         if (['SelectDestination', 'ToggleDestination', 'ResetDefaults', 'SelectPreset', 'ToggleOutputBoost', 'SetOutputBoost'].includes(method)) {
             this._invalidateLevels();
             this._barriers.push({method, args, done});
             this._drainBarriers();
             return;
         }
+        if (['TogglePanic', 'ResetDefaults', 'SelectDestination', 'ToggleDestination'].includes(method)) this._endKeyHold();
         if (method === 'TogglePanic') this._invalidateLevels();
         this._invokeDBus(method, args, error => {
             done?.(error);
@@ -765,7 +786,8 @@ export default class EasyProfileExtension extends Extension {
 
             // 5) TECLA "0": muta/desmuta microfone (Dual-Mute)
             {name: 'shortcut-mute-mic', flags: noRepeat, handler: () => {
-                this._callDBus('ToggleMicMute', []);
+                if (this._status?.push_to_talk) this._beginKeyHold('talk');
+                else this._callDBus('ToggleMicMute', []);
             }},
 
             // 6) TECLA ",": muta/desmuta saída
@@ -786,9 +808,12 @@ export default class EasyProfileExtension extends Extension {
                 });
             }},
 
-            // 13) TECLA "/": ativa DynamicEqualizer (placeholder)
-            {name: 'shortcut-dynamic-eq', flags: noRepeat, handler: () => {
-                console.log('EasyProfile: DynamicEqualizer ativado (placeholder)');
+            // Hold "/" for three seconds to enter PTT; a new press exits.
+            {name: 'shortcut-push-to-talk', flags: noRepeat, handler: () => {
+                if (this._status?.push_to_talk) {
+                    this._endKeyHold();
+                    this._callDBus('SetPushToTalk', [false]);
+                } else this._beginKeyHold('mode');
             }},
 
             // '*' restores daily levels/preset while preserving mic mutes; no restart.
@@ -837,10 +862,89 @@ export default class EasyProfileExtension extends Extension {
     }
 
     _unregisterKeybindings() {
+        this._endKeyHold();
+        if (this._status?.push_to_talk) this._callDBus('SetPushToTalk', [false]);
         for (const name of this._keybindingKeys) {
             Main.wm.removeKeybinding(name);
         }
         this._keybindingKeys = [];
+    }
+
+    // GNOME 46 global keybindings provide press callbacks only. A temporary
+    // Shell grab owns the release while one of these two keys is held.
+    _beginKeyHold(kind) {
+        if (this._keyHold || !this._enabled || !this._proxy?.g_name_owner) return;
+        if (kind === 'talk' && this._status?.panic_active) return;
+        let grab;
+        try {
+            grab = Main.pushModal(this._indicator, {actionMode: Shell.ActionMode.NORMAL | Shell.ActionMode.OVERVIEW});
+            if (!(grab.get_seat_state() & Clutter.GrabState.KEYBOARD)) {
+                Main.popModal(grab);
+                this._showOSD('Não foi possível acompanhar a tecla; microfone continua mutado', 'dialog-error-symbolic');
+                return;
+            }
+        } catch (error) {
+            this._showOSD(`Push-to-talk indisponível: ${error}`, 'dialog-error-symbolic');
+            return;
+        }
+        const hold = {kind, grab, epoch: this._status?.talk_epoch, started: GLib.get_monotonic_time()};
+        this._keyHold = hold;
+        hold.releaseSignal = global.stage.connect('captured-event', (_stage, event) => {
+            if (event.type() !== Clutter.EventType.KEY_RELEASE) return Clutter.EVENT_PROPAGATE;
+            const symbol = event.get_key_symbol();
+            if ((kind === 'mode' && symbol === Clutter.KEY_KP_Divide) ||
+                (kind === 'talk' && [Clutter.KEY_KP_0, Clutter.KEY_KP_Insert].includes(symbol))) {
+                this._endKeyHold();
+                return Clutter.EVENT_STOP;
+            }
+            return Clutter.EVENT_PROPAGATE;
+        });
+        if (kind === 'mode') {
+            hold.timer = GLib.timeout_add(GLib.PRIORITY_DEFAULT, 3000, () => {
+                hold.timer = 0;
+                if (this._keyHold === hold && this._keymap?.get_num_lock_state()) {
+                    this._callDBus('SetPushToTalk', [true], error => {
+                        if (!error) this._showOSD('Push-to-talk: segure 0 para falar; solte para mutar', 'microphone-sensitivity-muted-symbolic');
+                    });
+                }
+                // Keep the grab until the original / release: no repeated toggle.
+                return GLib.SOURCE_REMOVE;
+            });
+        } else {
+            this._sendTalkHold(hold);
+        }
+    }
+
+    _sendTalkHold(hold) {
+        if (this._keyHold !== hold) return;
+        // Bound an otherwise lost release as well as protecting against Shell death.
+        if (GLib.get_monotonic_time() - hold.started >= 60000000) {
+            this._endKeyHold();
+            this._showOSD('Push-to-talk: solte e pressione 0 novamente (limite de 60 s)', 'microphone-sensitivity-muted-symbolic');
+            return;
+        }
+        const sequence = ++this._talkSequence;
+        this._invokeDBus('SetTalkPressed', [hold.epoch, sequence, true], error => {
+            if (this._keyHold !== hold) return;
+            if (error) { this._endKeyHold(); return; }
+            hold.timer = GLib.timeout_add(GLib.PRIORITY_DEFAULT, 750, () => {
+                hold.timer = 0;
+                this._sendTalkHold(hold);
+                return GLib.SOURCE_REMOVE;
+            });
+        });
+    }
+
+    _endKeyHold() {
+        const hold = this._keyHold;
+        if (!hold) return;
+        this._keyHold = null;
+        if (hold.timer) GLib.Source.remove(hold.timer);
+        if (hold.releaseSignal) global.stage.disconnect(hold.releaseSignal);
+        Main.popModal(hold.grab);
+        if (hold.kind === 'talk' && this._proxy?.g_name_owner) {
+            this._callDBus('SetTalkPressed', [hold.epoch, ++this._talkSequence, false]);
+        }
     }
 
     _showOSD(message, iconName, durationMs = 1500) {

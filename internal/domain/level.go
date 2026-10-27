@@ -7,7 +7,7 @@ import (
 
 // PercentageLevel is an immutable value object representing audio volume/gain
 // in integer percentage points (normally 0 to 100). Only NewOutputLevel permits
-// up to 112 for logical output; hardware and microphone constructors stay capped.
+// up to 150 for logical output; hardware and microphone constructors stay capped.
 // Using integer basis points completely prevents IEEE-754 floating-point drift
 // (e.g. 0.9400000000000001) during repeated ±2% adjustments.
 type PercentageLevel struct {
@@ -39,7 +39,7 @@ func NewPercentageFromRatio(ratio float64) PercentageLevel {
 	return NewPercentageLevel(rounded)
 }
 
-// Percent returns the stored integer percentage (up to 112 for logical output).
+// Percent returns the stored integer percentage (up to 150 for logical output).
 func (l PercentageLevel) Percent() int {
 	return l.percent
 }

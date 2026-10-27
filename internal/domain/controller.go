@@ -17,6 +17,8 @@ type PanicSnapshot struct {
 // AudioController is the root domain aggregate governing audio routes, per-port volume memory,
 // Dual-Mute privacy, Panic Mute snapshots with manual overrides, and daily baseline resets.
 type AudioController struct {
+	pushToTalk            bool
+	pttRecovery           bool
 	mu                    sync.RWMutex
 	destinations          map[DestinationID]*Destination
 	activeDestination     DestinationID
@@ -134,6 +136,7 @@ func newAudioController(store *SessionStore, akg, sp166 *Destination) *AudioCont
 }
 
 func (c *AudioController) restoreFromSessionData(data *SessionData) {
+	c.pttRecovery = data.PushToTalkPendingMute
 	c.panicState = data.Panic
 	if _, ok := c.destinations[data.ActiveDestination]; ok {
 		c.activeDestination = data.ActiveDestination
@@ -163,15 +166,20 @@ func (c *AudioController) persist() {
 		return
 	}
 	session := &SessionData{
-		Version:           1,
-		SessionID:         c.sessionID,
-		Panic:             c.panicState,
-		ActiveDestination: c.activeDestination,
-		OutputMuted:       c.outputMuted,
-		MicLevelPct:       c.mic.PostDSPLevel.Percent(),
-		MicVirtualMuted:   c.mic.VirtualMuted,
-		MicPhysicalMuted:  c.mic.PhysicalMuted,
-		Ports:             make(map[DestinationID]PortSessionState, len(c.portMemory)),
+		Version:               1,
+		PushToTalkPendingMute: c.pushToTalk || c.pttRecovery,
+		SessionID:             c.sessionID,
+		Panic:                 c.panicState,
+		ActiveDestination:     c.activeDestination,
+		OutputMuted:           c.outputMuted,
+		MicLevelPct:           c.mic.PostDSPLevel.Percent(),
+		MicVirtualMuted:       c.mic.VirtualMuted,
+		MicPhysicalMuted:      c.mic.PhysicalMuted,
+		Ports:                 make(map[DestinationID]PortSessionState, len(c.portMemory)),
+	}
+	if c.pushToTalk || c.pttRecovery {
+		session.MicVirtualMuted = true
+		session.MicPhysicalMuted = true
 	}
 	for id, state := range c.portMemory {
 		state.VirtualVolume = min(state.VirtualVolume, 100)
@@ -329,9 +337,12 @@ func (c *AudioController) SetOutputVolume(level PercentageLevel) PercentageLevel
 
 	mem := c.portMemory[c.activeDestination]
 	level = NewOutputLevel(level.Percent(), c.outputBoost)
+	oldPersisted := min(mem.VirtualVolume, 100)
 	mem.VirtualVolume = level.Percent()
 	c.portMemory[c.activeDestination] = mem
-	c.persist()
+	if oldPersisted != min(mem.VirtualVolume, 100) || !c.persistedSuccessfully || c.persistenceErr != nil {
+		c.persist()
+	}
 	return level
 }
 

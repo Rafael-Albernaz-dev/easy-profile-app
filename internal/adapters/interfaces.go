@@ -28,6 +28,8 @@ type DSPDevices struct {
 // PipeWireObservation derives the related graph checks from one fresh snapshot.
 // Mute readbacks remain independent, using the existing wpctl path.
 type PipeWireObservation struct {
+	OutputIdle         bool
+	NativeOutputPath   []string
 	Graph              GraphState
 	GraphError         error
 	RawMicStreams      []string
@@ -80,6 +82,7 @@ type AlsaPort interface {
 
 // EasyEffectsPort defines the preset management capabilities for EasyEffects.
 type EasyEffectsPort interface {
+	ValidateOutputDSP(preset string, native []string, enabled, idle bool) error
 	SetOutputBoost(ctx context.Context, enabled bool, percent int) error
 	ReadDevices(ctx context.Context) (DSPDevices, error)
 	EnsureDevices(ctx context.Context, output, input string) error

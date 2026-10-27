@@ -10,14 +10,20 @@ source += '\nglobalThis.AuditedExtension = EasyProfileExtension;';
 let nextSource = 1;
 const timers = new Map();
 const bindings = new Map();
+const stageSignals = new Map();
+let modalGrabs = 0;
+const stage = {connect(_name,callback) { const id=nextSource++;stageSignals.set(id,callback);return id; },
+    disconnect(id) { assert(stageSignals.delete(id)); }};
 const context = {
     Extension: class {}, console,
-    GLib: {PRIORITY_DEFAULT: 0, SOURCE_REMOVE: false,
+    global: {stage},
+    Clutter: {GrabState:{KEYBOARD:1},EventType:{KEY_RELEASE:2},KEY_KP_Divide:111,KEY_KP_0:112,KEY_KP_Insert:113,EVENT_STOP:true,EVENT_PROPAGATE:false},
+    GLib: {get_monotonic_time:()=>0, PRIORITY_DEFAULT: 0, SOURCE_REMOVE: false,
         timeout_add: (_priority, _duration, callback) => { const id = nextSource++; timers.set(id, callback); return id; },
         Source: {remove: id => { assert(timers.delete(id)); }}},
     Meta: {KeyBindingFlags: {IGNORE_AUTOREPEAT: 1, NONE: 0}, KeyBindingAction: {NONE: 0}},
     Shell: {ActionMode: {NORMAL: 1, OVERVIEW: 2}},
-    Main: {wm: {addKeybinding: (name, _settings, flags, _mode, handler) => { bindings.set(name, {flags, handler}); return 1; },
+    Main: {pushModal:()=>{modalGrabs++;return {get_seat_state:()=>1};},popModal:()=>{modalGrabs--;},wm: {addKeybinding: (name, _settings, flags, _mode, handler) => { bindings.set(name, {flags, handler}); return 1; },
         removeKeybinding: name => bindings.delete(name)}},
 };
 vm.createContext(context); vm.runInContext(source, context);
@@ -33,7 +39,7 @@ function extension() {
         _levelInFlight: new Set(), _retrySources: new Set(), _barriers: [], _barrierBusy: false,
         _status: status(), _targetChannel: 'out', _keybindingKeys: [], _keymap: {get_num_lock_state: () => true},
         _cancellable: {cancel() {}}, _settings: {}});
-    for (const key of ['_label', '_icon', '_muteBadge', '_micMuteBadge', '_listenBadge', '_shareItem', '_boostItem', '_btnAKG', '_btnSP166',
+    for (const key of ['_label', '_icon', '_muteBadge', '_micMuteBadge', '_listenBadge', '_shareItem', '_boostItem', '_pttItem', '_btnAKG', '_btnSP166',
         '_volSlider', '_micSlider', '_btnMuteOut', '_btnMuteMic', '_presetsSubMenu', '_warningBanner', '_rawStreamMenu']) e[key] = actor();
     const calls = [];
     const proxy = {g_name_owner: ':fake.1'};
@@ -154,19 +160,40 @@ console.log('Extension regressions passed: sharing/readback/lifecycle, destinati
 
 {
  const {e,calls}=extension();
- e._status={...status('akg',100),output_boost:true,output_max_percent:112};
- e._queueLevel('out',120,true);
- assert.deepEqual(Array.from(calls[0].args),['akg',112]);
- assert.match(e._label.text,/112%.*BOOST/);
- e._queueLevel('mic',112,true);
+ e._status={...status('akg',100),output_boost:true,output_max_percent:150};
+ e._queueLevel('out',180,true);
+ assert.deepEqual(Array.from(calls[0].args),['akg',150]);
+ assert.match(e._label.text,/150%.*BOOST/);
+ e._queueLevel('mic',150,true);
  assert.deepEqual(Array.from(calls[1].args),[100]);
  e._callDBus('SetOutputBoost',[false]);
  assert.equal(e._pendingLevels.size,0);
  assert.equal(calls.length,2,'Boost toggle must wait for in-flight levels');
- calls[0].callback([112],null); calls[1].callback([100],null);
+ calls[0].callback([150],null); calls[1].callback([100],null);
  assert.equal(calls[2].method,'SetOutputBoost');
  e._status={...status('akg',100),output_boost:false,output_max_percent:100};
  calls[2].callback([false],null);
  e._queueLevel('out',1,false);
  assert.deepEqual(Array.from(calls[3].args),['akg',100]);
 }
+
+function fireTimer(id) { const callback=timers.get(id);assert(callback);timers.delete(id);callback(); }
+function releaseKey(symbol) { for(const callback of Array.from(stageSignals.values())) callback(stage,{type:()=>2,get_key_symbol:()=>symbol}); }
+{
+ const {e}=extension();const actions=[];
+ e._callDBus=(method,args,done)=>{actions.push([method,args]);done?.(null);};
+ e._beginKeyHold('mode');const early=e._keyHold.timer;
+ releaseKey(111);assert(!timers.has(early));assert.equal(actions.length,0,'short / must not enable');
+ e._beginKeyHold('mode');fireTimer(e._keyHold.timer);
+ assert.equal(actions[0][0],'SetPushToTalk');assert.equal(actions[0][1][0],true);
+ releaseKey(111);assert.equal(modalGrabs,0);assert.equal(stageSignals.size,0);
+ e._status={...status(),push_to_talk:true,talk_epoch:7};e._talkSequence=0;
+ const pending=[];e._invokeDBus=(method,args,done)=>pending.push({method,args,done});
+ e._beginKeyHold('talk');assert.equal(pending[0].method,'SetTalkPressed');assert.deepEqual(Array.from(pending[0].args),[7,1,true]);
+ releaseKey(112);assert.deepEqual(Array.from(actions[1][1]),[7,2,false]);
+ pending[0].done(null);assert.equal(timers.size,0,'late press ack must not restart heartbeat');
+ e._beginKeyHold('talk');pending[1].done(null);assert.equal(timers.size,1);
+ e._unregisterKeybindings();assert.equal(timers.size,0);assert.equal(stageSignals.size,0);assert.equal(modalGrabs,0);
+ assert.equal(actions.at(-1)[0],'SetPushToTalk');assert.equal(actions.at(-1)[1][0],false);
+}
+console.log('Push-to-talk handlers: short/long /, real release, late ACK, lifecycle and mute-on-exit passed.');

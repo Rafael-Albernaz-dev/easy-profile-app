@@ -28,6 +28,11 @@ const (
 
 // DaemonStatus represents the complete serialized state broadcast to clients.
 type DaemonStatus struct {
+	OutputDSPIdle               bool            `json:"output_dsp_idle"`
+	PushToTalk                  bool            `json:"push_to_talk"`
+	TalkPressed                 bool            `json:"talk_pressed"`
+	TalkEpoch                   uint32          `json:"talk_epoch"`
+	OutputBoostConfirmed        bool            `json:"output_boost_confirmed"`
 	OutputBoost                 bool            `json:"output_boost"`
 	OutputMaxPercent            int             `json:"output_max_percent"`
 	DSPBound                    bool            `json:"dsp_bound"`
@@ -81,6 +86,10 @@ type request struct {
 // Daemon has one hardware writer. Panic cancels an in-flight command and runs
 // ahead of queued normal work. Every interrupted route remains physically muted.
 type Daemon struct {
+	talkPressed        bool
+	talkEpoch          uint32
+	talkSequence       uint32
+	talkTimer          *time.Timer
 	hardware           Config
 	activePanic        bool
 	panicSnapshotKnown bool
@@ -141,6 +150,12 @@ func (d *Daemon) Close() {
 	<-d.done
 	d.mu.Lock()
 	defer d.mu.Unlock()
+	d.cancelTalkLease()
+	if !d.observeOnly && d.ctrl.PushToTalk() {
+		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+		_ = d.muteTalk(ctx)
+		cancel()
+	}
 	if !d.observeOnly && d.ctrl.OutputBoost() {
 		ctx, cancel := context.WithTimeout(context.Background(), 4*time.Second)
 		err := d.ee.SetOutputBoost(ctx, false, min(d.ctrl.OutputVolumePercent(), 100))
@@ -273,6 +288,7 @@ func (d *Daemon) Export(conn *dbus.Conn) error {
 		"ResetDefaults": d.ResetDefaults, "GetRawMicStreams": d.GetRawMicStreams, "MigrateRawMicStream": d.MigrateRawMicStream,
 		"ToggleMicMonitoring": d.ToggleMicMonitoring, "SetMicMonitoring": d.SetMicMonitoring,
 		"ToggleOutputSharing": d.ToggleOutputSharing, "SetOutputSharing": d.SetOutputSharing,
+		"SetPushToTalk": d.SetPushToTalk, "SetTalkPressed": d.SetTalkPressed,
 		"ToggleOutputBoost": d.ToggleOutputBoost, "SetOutputBoost": d.SetOutputBoost,
 	}
 	if err := conn.ExportMethodTable(methods, dbus.ObjectPath(DBusPath), DBusInterface); err != nil {
@@ -295,6 +311,9 @@ func (d *Daemon) updateStatus(err error) {
 	mic := d.ctrl.Microphone()
 	d.status.ActiveDestination = DestinationInfo{string(dest.ID), dest.Label, dest.RouteName, dest.PhysicalCeiling.Percent()}
 	d.status.OutputVolume = d.ctrl.OutputVolumePercent()
+	d.status.PushToTalk = d.ctrl.PushToTalk()
+	d.status.TalkPressed = d.talkPressed && d.status.ObservedMicVirtualMute != nil && d.status.ObservedMicPhysicalMute != nil && !*d.status.ObservedMicVirtualMute && !*d.status.ObservedMicPhysicalMute
+	d.status.TalkEpoch = d.talkEpoch
 	d.status.OutputBoost = d.ctrl.OutputBoost()
 	d.status.OutputMaxPercent = 100
 	if d.status.OutputBoost {
@@ -401,11 +420,17 @@ func (d *Daemon) refresh(ctx context.Context) error {
 	d.status.ObservedDestination = observation.SinkPort
 	preset, presetErr := d.ee.GetActivePreset(ctx)
 	d.status.ObservedPreset = preset
+	nativeErr := d.ee.ValidateOutputDSP(preset, observation.NativeOutputPath, d.ctrl.OutputBoost(), observation.OutputIdle)
+	d.status.OutputDSPIdle = observation.OutputIdle
+	d.status.OutputBoostConfirmed = presetErr == nil && nativeErr == nil && len(observation.NativeOutputPath) > 0
+	if nativeErr != nil {
+		d.status.DSPBound = false
+	}
 	if observation.MicMonitoringKnown {
 		d.ctrl.SetMicMonitoring(observation.MicMonitoring)
 		d.status.MicMonitoring = observation.MicMonitoring
 	}
-	return errors.Join(observationErr, devicesErr, e1, presetErr, read(d.hardware.VirtualSink, &d.status.ObservedOutputMute), read(d.hardware.VirtualSource, &d.status.ObservedMicVirtualMute), read(d.hardware.PhysicalMicrophonePrefix, &d.status.ObservedMicPhysicalMute))
+	return errors.Join(observationErr, devicesErr, e1, presetErr, nativeErr, read(d.hardware.VirtualSink, &d.status.ObservedOutputMute), read(d.hardware.VirtualSource, &d.status.ObservedMicVirtualMute), read(d.hardware.PhysicalMicrophonePrefix, &d.status.ObservedMicPhysicalMute))
 }
 
 // Observe refreshes graph-dependent alerts and observed mutes without modifying hardware.
@@ -490,6 +515,12 @@ func (d *Daemon) InitHardware(ctx context.Context) error {
 				}
 			}
 		} else {
+			if d.ctrl.TalkRecoveryPending() {
+				if err := d.muteTalk(c); err != nil {
+					return err
+				}
+				d.ctrl.ConfirmTalkRecovery()
+			}
 			// RESTART WITHIN SAME SESSION:
 			// Adopt observed mutes to respect existing user privacy
 			if !d.ctrl.PanicState().Active {
@@ -634,10 +665,8 @@ func (d *Daemon) applyDestination(ctx context.Context, dest *domain.Destination)
 		case <-timer.C:
 		}
 	}
-	if d.ctrl.OutputBoost() {
-		if err = d.ee.SetOutputBoost(ctx, true, d.ctrl.OutputVolumePercent()); err != nil {
-			return err
-		}
+	if err = d.ee.SetOutputBoost(ctx, d.ctrl.OutputBoost(), d.ctrl.OutputVolumePercent()); err != nil {
+		return err
 	}
 	if err = d.ee.LoadPreset(ctx, d.ctrl.ActiveOutputPreset()); err != nil {
 		return err
@@ -692,6 +721,7 @@ func (d *Daemon) GetStatus() (string, *dbus.Error) {
 func (d *Daemon) applyVolume(ctx context.Context, target int, mic bool) (applied int, retErr error) {
 	defer func() {
 		if retErr != nil && !mic && !d.observeOnly && d.ctrl.OutputBoost() {
+			d.status.OutputBoostConfirmed = false
 			// The worker deadline/cancellation may have caused the failure. A
 			// separate bounded context must still allow the fail-safe mute.
 			safe, cancel := context.WithTimeout(context.Background(), 3*time.Second)
@@ -712,11 +742,15 @@ func (d *Daemon) applyVolume(ctx context.Context, target int, mic bool) (applied
 			return 0, err
 		}
 	}
-	if err := d.pw.SetNodeVolume(ctx, node, domain.NewPercentageLevel(level.Percent()).LinearRatio()); err != nil {
-		return 0, err
-	}
-	if err := d.pw.EnsureMonitorChannelVolumes(ctx, node); err != nil {
-		return 0, err
+	// Above unity only the limiter gain changes. Rewriting the identical sink
+	// volume would create more graph events/subprocesses for every 1% keypress.
+	if mic || !d.ctrl.OutputBoost() || min(d.ctrl.OutputVolumePercent(), 100) != min(level.Percent(), 100) {
+		if err := d.pw.SetNodeVolume(ctx, node, domain.NewPercentageLevel(level.Percent()).LinearRatio()); err != nil {
+			return 0, err
+		}
+		if err := d.pw.EnsureMonitorChannelVolumes(ctx, node); err != nil {
+			return 0, err
+		}
 	}
 	if mic {
 		d.ctrl.SetMicLevel(level)
@@ -784,6 +818,11 @@ func (d *Daemon) ToggleMicMute() (bool, *dbus.Error) {
 		if err := d.control(); err != nil {
 			return err
 		}
+		if d.ctrl.PushToTalk() {
+			d.talkEpoch++
+			value = true
+			return d.muteTalk(ctx)
+		}
 		if d.ctrl.OutputSharing() || d.status.OutputSharingRestorePending {
 			stopErr := d.stopSharing(ctx)
 			d.ctrl.MuteMicrophone()
@@ -806,6 +845,12 @@ func (d *Daemon) TogglePanic() (bool, *dbus.Error) {
 	err := d.execute(true, func(ctx context.Context) error {
 		if err := d.control(); err != nil {
 			return err
+		}
+		if d.ctrl.PushToTalk() {
+			// Explicitly end the hold before taking the independent panic snapshot.
+			if err := d.setPushToTalk(ctx, false); err != nil {
+				return errors.Join(err, d.panicMutes(ctx))
+			}
 		}
 		// Sharing is never re-enabled by panic restoration. The three-boolean
 		// acoustic snapshot remains independent of the transient capture route.
@@ -837,6 +882,11 @@ func (d *Daemon) TogglePanic() (bool, *dbus.Error) {
 func (d *Daemon) selectDestination(ctx context.Context, name string) error {
 	if err := d.control(); err != nil {
 		return err
+	}
+	if d.ctrl.PushToTalk() {
+		if err := d.setPushToTalk(ctx, false); err != nil {
+			return err
+		}
 	}
 	if err := d.stopSharing(ctx); err != nil {
 		return err
@@ -896,6 +946,11 @@ func (d *Daemon) ResetDefaults() *dbus.Error {
 		}
 		if err := d.stopSharing(ctx); err != nil {
 			return err
+		}
+		if d.ctrl.PushToTalk() {
+			if err := d.setPushToTalk(ctx, false); err != nil {
+				return err
+			}
 		}
 		if d.ctrl.OutputBoost() {
 			if err := d.setOutputBoost(ctx, false); err != nil {
@@ -1067,6 +1122,9 @@ func (d *Daemon) ToggleMicMonitoring() (bool, *dbus.Error) {
 			current = d.ctrl.MicMonitoring()
 		}
 		target := !current
+		if target && d.ctrl.PushToTalk() {
+			return errors.New("saia do push-to-talk antes de escutar o microfone")
+		}
 		if target && (d.ctrl.OutputSharing() || d.status.OutputSharingRestorePending) {
 			return errors.New("turn off output sharing before microphone listening")
 		}
@@ -1087,6 +1145,9 @@ func (d *Daemon) SetMicMonitoring(enabled bool) (bool, *dbus.Error) {
 	err := d.execute(false, func(ctx context.Context) error {
 		if err := d.control(); err != nil {
 			return err
+		}
+		if enabled && d.ctrl.PushToTalk() {
+			return errors.New("saia do push-to-talk antes de escutar o microfone")
 		}
 		if enabled && (d.ctrl.OutputSharing() || d.status.OutputSharingRestorePending) {
 			return errors.New("turn off output sharing before microphone listening")

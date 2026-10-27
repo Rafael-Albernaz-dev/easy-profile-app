@@ -5,6 +5,9 @@ import "errors"
 func (c *AudioController) CanShareOutput() error {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
+	if c.pushToTalk {
+		return errors.New("saia do push-to-talk antes de compartilhar a saída")
+	}
 	if c.panicState.Active {
 		return errors.New("output sharing is unavailable during panic")
 	}

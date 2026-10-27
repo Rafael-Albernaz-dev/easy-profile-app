@@ -53,10 +53,10 @@
       <summary>Toggle Mute Total (Pânico)</summary>
     </key>
 
-    <!-- Daily reset on '*' and DynamicEqualizer placeholder on '/' -->
-    <key name="shortcut-dynamic-eq" type="as">
+    <!-- Daily reset on '*' and push-to-talk on '/' -->
+    <key name="shortcut-push-to-talk" type="as">
       <default><![CDATA[['KP_Divide']]]></default>
-      <summary>Ativar DynamicEqualizer</summary>
+      <summary>Segure 3s para push-to-talk; toque para sair</summary>
     </key>
     <key name="shortcut-reset-app" type="as">
       <default><![CDATA[['KP_Multiply']]]></default>
@@ -74,7 +74,7 @@
     </key>
     <key name="shortcut-noop-9" type="as">
       <default><![CDATA[['KP_9']]]></default>
-      <summary>Alternar Boost da saída até 112%</summary>
+      <summary>Alternar Boost da saída até 150%</summary>
     </key>
   </schema>
 </schemalist>

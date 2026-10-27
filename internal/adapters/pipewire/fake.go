@@ -46,7 +46,7 @@ func (f *FakePipeWire) ReadObservation(ctx context.Context, sink, source, physic
 	route, routeErr := f.GetSinkPort(ctx, physicalSink)
 	monitoring, monitorErr := f.GetMicMonitoring(ctx, source, sink)
 	sharing, sharingErr := f.ReadOutputSharing(ctx)
-	return adapters.PipeWireObservation{Graph: graph, GraphError: graphErr, RawMicStreams: raw, SinkPort: route, MicMonitoring: monitoring, MicMonitoringKnown: monitorErr == nil, Sharing: sharing}, errors.Join(graphErr, rawErr, routeErr, monitorErr, sharingErr)
+	return adapters.PipeWireObservation{NativeOutputPath: []string{"fake-output"}, Graph: graph, GraphError: graphErr, RawMicStreams: raw, SinkPort: route, MicMonitoring: monitoring, MicMonitoringKnown: monitorErr == nil, Sharing: sharing}, errors.Join(graphErr, rawErr, routeErr, monitorErr, sharingErr)
 }
 
 func (f *FakePipeWire) StartOutputSharing(ctx context.Context, sink string) error {

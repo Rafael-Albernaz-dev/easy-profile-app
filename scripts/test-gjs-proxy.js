@@ -16,14 +16,33 @@ const pendingCall = new Gio.Cancellable();
 function verifyBoost(client, done) {
  client.SetOutputBoostRemote(true, (reply,error)=> {
   if(error||reply[0]!==true){printerr(error??'Boost enable failed');loop.quit();return;}
-  client.SetVolumeAbsoluteRemote(112,(level,levelError)=> {
-   if(levelError||level[0]!==112){printerr(levelError??'Boost level failed');loop.quit();return;}
+  client.SetVolumeAbsoluteRemote(150,(level,levelError)=> {
+   if(levelError||level[0]!==150){printerr(levelError??'Boost level failed');loop.quit();return;}
    client.ToggleOutputBoostRemote((off,offError)=> {
     if(offError||off[0]!==false){printerr(offError??'Boost disable failed');loop.quit();return;}
     client.GetStatusRemote(([json],statusError)=>{
      const state=JSON.parse(json);
      if(statusError||state.output_boost||state.output_volume!==100){printerr(statusError??'Boost readback failed');loop.quit();return;}
      done();
+    },cancellable);
+   },cancellable);
+  },cancellable);
+ },cancellable);
+}
+function verifyPTT(client, done) {
+ client.SetPushToTalkRemote(true,([epoch],error)=>{
+  if(error||!epoch){printerr(error??'PTT mode failed');loop.quit();return;}
+  client.SetTalkPressedRemote(epoch,1,true,([active],error)=>{
+   if(error||!active){printerr(error??'PTT press failed');loop.quit();return;}
+   client.SetTalkPressedRemote(epoch,2,false,(_reply,error)=>{
+    if(error){printerr(error);loop.quit();return;}
+    client.SetPushToTalkRemote(false,(_reply,error)=>{
+     if(error){printerr(error);loop.quit();return;}
+     client.GetStatusRemote(([json],error)=>{
+      const s=JSON.parse(json);
+      if(error||s.push_to_talk||s.talk_pressed||!s.mic_privacy_muted){printerr(error??'PTT privacy mismatch');loop.quit();return;}
+      done();
+     },cancellable);
     },cancellable);
    },cancellable);
   },cancellable);
@@ -36,7 +55,7 @@ function verifySharing(client, done) {
             if (statusError || !JSON.parse(json).output_sharing) { printerr(statusError ?? 'sharing readback missing'); loop.quit(); return; }
             client.ToggleOutputSharingRemote((offReply, offError) => {
                 if (offError || offReply[0] !== false) { printerr(offError ?? 'sharing did not stop'); loop.quit(); return; }
-                verifyBoost(client, done);
+                verifyBoost(client, () => verifyPTT(client,done));
             }, cancellable);
         }, cancellable);
     }, cancellable);

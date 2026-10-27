@@ -30,6 +30,8 @@ export const DBusInterface = `
     <method name="ToggleOutputMute">
       <arg type="b" direction="out" name="muted"/>
     </method>
+    <method name="SetPushToTalk"><arg type="b" direction="in" name="enabled"/><arg type="u" direction="out" name="epoch"/></method>
+    <method name="SetTalkPressed"><arg type="u" direction="in" name="epoch"/><arg type="u" direction="in" name="sequence"/><arg type="b" direction="in" name="pressed"/><arg type="b" direction="out" name="active"/></method>
     <method name="ToggleMicMute">
       <arg type="b" direction="out" name="muted"/>
     </method>

@@ -85,7 +85,18 @@ func (r *RealEasyEffects) LoadPreset(ctx context.Context, presetName string) err
 			active, err = r.GetActivePreset(ctx)
 		}
 		if err == nil && active == presetName {
-			return nil
+			chain, chainErr := r.presetPlugins(presetName)
+			if chainErr == nil {
+				if r.boostEnabled {
+					chain = append(chain, boostPlugin)
+				}
+				err = r.confirmOutputDSP(ctx, chain)
+				if err == nil {
+					return nil
+				}
+			} else {
+				err = chainErr
+			}
 		}
 		select {
 		case <-ctx.Done():

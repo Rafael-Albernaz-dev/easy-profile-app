@@ -10,6 +10,8 @@ import (
 
 func observationFromGraph(g *inspect.Graph, sink, source, physicalSink, micPrefix string) (adapters.PipeWireObservation, error) {
 	var obs adapters.PipeWireObservation
+	obs.OutputIdle = inspect.OutputIsIdle(g, sink)
+	obs.NativeOutputPath, _ = inspect.OutputPluginPath(g, sink, physicalSink)
 	var graphErr, rawErr, routeErr error
 	obs.Graph, graphErr = graphState(g, sink, source, physicalSink, micPrefix)
 	obs.GraphError = graphErr

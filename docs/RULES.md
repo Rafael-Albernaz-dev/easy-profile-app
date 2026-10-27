@@ -65,7 +65,7 @@ Marcador de login e snapshot de áudio são arquivos distintos, atômicos e priv
 ## 6. Contrato autorizado de compartilhamento e Boost
 
 Numpad `8` alterna o compartilhamento de toda a saída em uma captura ativa.
-Numpad `9` alterna Boost somente da saída: libera até 112% lógicos (~+2,95 dB),
+Numpad `9` alterna Boost somente da saída: libera até 150% lógicos (~+10,57 dB),
 sem elevar o nível atual. Microfone e volumes reais PipeWire/ALSA continuam
 limitados a 100% e aos tetos físicos calibrados. O ganho extra fica antes de um
 limitador LSP temporário ao final do preset, nunca nos arquivos de presets.

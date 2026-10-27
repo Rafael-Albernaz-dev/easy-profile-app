@@ -17,15 +17,16 @@ type PortSessionState struct {
 
 // SessionData represents the schema saved to disk in $XDG_STATE_HOME/easyprofile/session.json.
 type SessionData struct {
-	Version           int                                `json:"version"`
-	SessionID         string                             `json:"session_id,omitempty"`
-	Panic             PanicSnapshot                      `json:"panic"`
-	ActiveDestination DestinationID                      `json:"active_destination"`
-	OutputMuted       bool                               `json:"output_muted"`
-	MicLevelPct       int                                `json:"mic_level_pct"`
-	MicVirtualMuted   bool                               `json:"mic_virtual_muted"`
-	MicPhysicalMuted  bool                               `json:"mic_physical_muted"`
-	Ports             map[DestinationID]PortSessionState `json:"ports"`
+	PushToTalkPendingMute bool                               `json:"push_to_talk_pending_mute,omitempty"`
+	Version               int                                `json:"version"`
+	SessionID             string                             `json:"session_id,omitempty"`
+	Panic                 PanicSnapshot                      `json:"panic"`
+	ActiveDestination     DestinationID                      `json:"active_destination"`
+	OutputMuted           bool                               `json:"output_muted"`
+	MicLevelPct           int                                `json:"mic_level_pct"`
+	MicVirtualMuted       bool                               `json:"mic_virtual_muted"`
+	MicPhysicalMuted      bool                               `json:"mic_physical_muted"`
+	Ports                 map[DestinationID]PortSessionState `json:"ports"`
 }
 
 // SessionStore handles loading and atomic saving of the session state.

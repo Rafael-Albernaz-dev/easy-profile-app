@@ -1,6 +1,6 @@
 package domain
 
-const BoostMaximumPercent = 112
+const BoostMaximumPercent = 150
 
 // NewOutputLevel is the only constructor permitting more than 100%. Microphone
 // and calibrated physical endpoints continue using NewPercentageLevel.

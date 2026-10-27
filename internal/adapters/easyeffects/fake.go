@@ -23,6 +23,7 @@ type FakeEasyEffects struct {
 	BoostEnabled     bool
 	BoostPercent     int
 	BoostErr         error
+	ValidateDSPErr   error
 }
 
 var _ adapters.EasyEffectsPort = (*FakeEasyEffects)(nil)
@@ -99,5 +100,17 @@ func (f *FakeEasyEffects) SetOutputBoost(ctx context.Context, enabled bool, perc
 	}
 	f.BoostEnabled, f.BoostPercent = enabled, percent
 	f.Calls = append(f.Calls, fmt.Sprintf("SetOutputBoost:%t:%d", enabled, percent))
+	return nil
+}
+
+func (f *FakeEasyEffects) ValidateOutputDSP(preset string, native []string, enabled, idle bool) error {
+	f.mu.RLock()
+	defer f.mu.RUnlock()
+	if f.ValidateDSPErr != nil {
+		return f.ValidateDSPErr
+	}
+	if f.BoostEnabled != enabled {
+		return fmt.Errorf("observed Boost differs from desired mode")
+	}
 	return nil
 }
