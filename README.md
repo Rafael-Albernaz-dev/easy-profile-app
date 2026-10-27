@@ -17,6 +17,8 @@ The calibrated setup uses AKG K52 front headphones, SP166 rear speakers and the 
 - Microphone monitoring (post-DSP sidetone) creates dedicated PipeWire links from `easyeffects_source` to `easyeffects_sink`. A blue headset panel icon indicates active monitoring, and enabling monitoring automatically un-mutes the microphone if muted.
 - Temporary whole-output sharing replaces one active call capture's microphone with the selected physical output monitor. Keypad `8`, the menu switch and `share on|off|toggle` restore the previous capture target on stop. Sharing includes notifications and participants' voices; it cannot run together with mic monitoring. Mic mute, panic, Reset and destination selection stop it. See [behavior and human QA](docs/features/OUTPUT_SHARING.md).
 
+Live sharing acceptance (2026-10-20): the WhatsApp listener received audio played in VLC, while Chrome playback was not received, including playback from a different Chrome profile. The current implementation is retained with this known browser limitation; its cause remains unconfirmed. This does not certify every player or all mute/restore/route transitions. The installed PTT experiment failed the real GNOME test and remains deferred; Boost and operational performance also have incomplete human acceptance. See the [sharing evidence](docs/features/OUTPUT_SHARING.md) and [operational gate](docs/performance/OPERATIONAL_QUALITY_GATE.md).
+
 Automated tests use in-memory audio adapters with `EASYPROFILE_TEST_MODE=1`. No test may control real audio. Production guards and the three calibrated preset files remain untouched during development. Passing local gates does not certify physical routing, sound quality or GNOME Shell behavior.
 
 ## System-default input/output in Meet and WhatsApp Web
@@ -37,7 +39,7 @@ See the [implementation, safety contract and human validation](docs/features/SYS
 | Key | Action | Repeat |
 |---|---|---|
 | `NumLock` | Audio mode on/off (`⚡`); off restores normal keypad behavior | Native toggle |
-| `+` | Focused output/mic volume +1%; output up to 112% with Boost, microphone always ≤100% | Yes |
+| `+` | Focused output/mic volume +1%; output up to 150% with Boost, microphone always ≤100% | Yes |
 | `-` | Focused output/mic volume −1%, clamped to 0% | Yes |
 | `1` | Select AKG K52; focus output | No |
 | `2` | Select SP166; focus output | No |
@@ -45,14 +47,14 @@ See the [implementation, safety contract and human validation](docs/features/SYS
 | `4` | Select base preset (`BasePreset` / daily approved profile) for the active output | No |
 | `5` | Previous preset (circular cycle through all compatible presets) | No |
 | `6` | Next preset (circular cycle through all compatible presets) | No |
-| `0` | Microphone dual-mute; red panel icon indicates mic mute state | No |
+| `0` | Dual-mute; in PTT hold to speak, release to mute | No |
 | `.` / `,` | Output mute (`KP_Decimal` / `KP_Separator`) | No |
 | `Enter` | Panic: output and microphone mute; toggle restores independent snapshot | No |
-| `/` | DynamicEqualizer placeholder; logs intent, no DSP change | No |
+| `/` | Hold 3s to enter push-to-talk; tap to exit | No |
 | `*` | Daily reset: base preset, output 95%, mic 100%; preserves both mic mutes | No |
 | `7` | Toggle post-DSP microphone monitoring (sidetone); blue headset panel icon; auto-unmutes mic | No |
 | `8` | Toggle whole-output sharing into one active call capture | No |
-| `9` | Toggle output Boost: unlock 112% ceiling without raising the current level | No |
+| `9` | Toggle output Boost: unlock 150% ceiling without raising the current level | No |
 
 NumLock is monitored natively; the other 16 bindings are registered only in audio mode. Only `+`/`-` allow autorepeat. Routine actions produce no OSD; real errors do. Volume labels update locally while confirmation is pending. Icons/mute claims use daemon state rather than assuming hardware success. Restart is available from the menu through systemd only; `*` does not restart the daemon.
 
@@ -144,7 +146,7 @@ Healthy reconciliation reuses one fresh graph observation and avoids redundant p
 
 Race tests, static checks, fake installer tests, private D-Bus integration and extension packaging passed. Full gate approval remains pending because the gate still expects legacy guards to be active after the completed cutover. The latest isolated Boost-slice checks met the fake/captured budgets: CLI p95 **5.257 ms**, parser **3.497 ms/op**, fake idle CPU **0%** and RSS after commands **9,716 KiB**. These do not measure actual Boost DSP performance. See [scope, measurements and human validation](docs/performance/RECONCILIATION_OPTIMIZATION.md).
 
-Keypad `9`, the Boost menu switch and `boost on|off|toggle` unlock an output ceiling of **112% (~+2.95 dB)**. Enabling does not raise the current level: use `+`/`−` or the slider afterwards. A temporary final LSP limiter applies the extra gain before limiting, without editing preset files or raising physical/microphone ceilings. Turning Boost off clamps levels above 100% to 100%; Reset and daemon restart start without Boost. Preset/route changes retain Boost within the running daemon. See [Boost behavior, engineering and human QA](docs/features/OUTPUT_BOOST.md).
+Keypad `9`, the Boost menu switch and `boost on|off|toggle` unlock an output ceiling of **150% (~+10.57 dB)**. Enabling does not raise the current level: use `+`/`−` or the slider afterwards. A temporary final LSP limiter applies the extra gain before limiting, without editing preset files or raising physical/microphone ceilings. Turning Boost off clamps levels above 100% to 100%; Reset and daemon restart start without Boost. Preset/route changes retain Boost within the running daemon. See [Boost behavior, engineering and human QA](docs/features/OUTPUT_BOOST.md).
 
 ## Observation and CLI
 
@@ -208,3 +210,16 @@ MIT © Rafael Albernaz.
 - `docs/`: [rules](docs/RULES.md), audits, handoffs, feature contracts and [performance report](docs/performance/RECONCILIATION_OPTIMIZATION.md).
 - `scripts/`, `systemd/`, `gnome-extension/`: operational tooling and desktop integration.
 - `test/fixtures/`: reproducible test inputs. Generated evidence in `docs/evidence/` and compiled schemas stay local and ignored.
+
+### Push-to-talk and operational impact
+
+With NumLock audio mode on, hold `/` for 3 seconds to enter PTT; hold `0` to speak
+and release to mute. Tap `/` again to exit, leaving the microphone muted.
+The menu and `ptt on|off` expose the same mode. On GNOME 46 a temporary keyboard
+grab tracks releases; other keys do not reach applications during a hold.
+See [privacy, deadlines and acceptance](docs/features/PUSH_TO_TALK.md).
+
+The [operational performance gate](docs/performance/OPERATIONAL_QUALITY_GATE.md)
+uses a 75-point floor and 80-point target with explicit measurements and hard
+blockers. It compares service impact; fake tests do not certify DSP or neighboring
+services. Missing comparable live evidence is reported as not certified.

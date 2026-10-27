@@ -104,6 +104,7 @@ schema=ET.parse(next((root/'schemas').glob('*.xml'))).getroot().find('schema').a
 assert metadata.get('settings-schema')==schema, 'metadata must bind Extension.getSettings() to schema'
 assert '46' in metadata['shell-version']
 PYMETADATA
+gjs "${REPO_ROOT}/scripts/test-boost-schema.js"
 make extension-pack
 CONTENTS="$(unzip -Z1 "${REPO_ROOT}/dist/easyprofile@gnome-shell.shell-extension.zip")"
 for entry in metadata.json extension.js dbus.js schemas/org.gnome.shell.extensions.easyprofile.gschema.xml; do
@@ -118,6 +119,7 @@ echo ""
 echo "[Gate 4/6] Running hermetic unit tests with race detector (EASYPROFILE_TEST_MODE=1)..."
 go test -race -v ./...
 python3 scripts/test-cutover.py
+python3 scripts/test-performance-impact.py
 node scripts/test-extension.cjs
 echo "✓ Hermetic unit tests passed with race detector."
 
