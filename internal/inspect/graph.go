@@ -53,6 +53,7 @@ func (v VolumeInfo) SoftDiffersFromChannel() bool {
 }
 
 type NodeInfo struct {
+	State                 string     `json:"state,omitempty"`
 	ID                    int        `json:"id"`
 	Serial                int        `json:"object_serial"`
 	Name                  string     `json:"name"`
@@ -202,7 +203,7 @@ func ParseGraph(data []byte) (*Graph, error) {
 
 func parseNode(id int, info *rawInfo) *NodeInfo {
 	p := info.Props
-	n := &NodeInfo{
+	n := &NodeInfo{State: info.State,
 		ID:          id,
 		Serial:      propInt(p, "object.serial"),
 		Name:        propString(p, "node.name"),
