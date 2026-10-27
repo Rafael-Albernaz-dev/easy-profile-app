@@ -37,6 +37,7 @@ type sharingSession struct {
 	changed          bool
 	restoring        bool
 	sink             string
+	sharedSerial     int
 }
 
 func (r *RealPipeWire) shareBackend() *sharingIO {
@@ -63,21 +64,32 @@ func setCaptureTarget(ctx context.Context, id int, target *inspect.TargetMetadat
 	return nil
 }
 
-func startSharingProcess(sink string) (*sharingProcess, error) {
+func sharingProperties(sink string) (string, string) {
 	capture, _ := json.Marshal(map[string]any{
 		"target.object": sink, "stream.capture.sink": true,
 		"node.name": "easyprofile_share_capture", "node.dont-fallback": true,
 		"node.dont-reconnect": true, "node.passive": true,
+		// PipeWire 1.0.x loopback copies channels by index; stereo -> mono
+		// here would discard FR. Negotiate MONO on both ends so the capture
+		// stream's channel mixer combines the physical monitor's FL and FR.
+		"audio.position": []string{"MONO"}, "audio.channels": 1,
+		"stream.dont-remix": false,
 	})
 	playback, _ := json.Marshal(map[string]any{
 		"node.name": sharingSource, "node.description": "EasyProfile — Compartilhar saída",
 		"media.class": "Audio/Source", "node.virtual": true,
 		"node.autoconnect": false,
+		"audio.position":   []string{"MONO"}, "audio.channels": 1,
 	})
+	return string(capture), string(playback)
+}
+
+func startSharingProcess(sink string) (*sharingProcess, error) {
+	capture, playback := sharingProperties(sink)
 	// A sharing session is transient and bounded. It never survives daemon death
 	// and stops after ten minutes even if the UI disappears.
 	life, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
-	cmd := exec.CommandContext(life, "pw-loopback", "--channels=2", "--capture-props="+string(capture), "--playback-props="+string(playback))
+	cmd := exec.CommandContext(life, "pw-loopback", "--capture-props="+capture, "--playback-props="+playback)
 	cmd.SysProcAttr = &syscall.SysProcAttr{Pdeathsig: syscall.SIGKILL}
 	if err := cmd.Start(); err != nil {
 		cancel()
@@ -100,42 +112,92 @@ func sharingCandidate(g *inspect.Graph, sink string) (*sharingSession, error) {
 	var sinkFound bool
 	for _, n := range g.Nodes {
 		if n.Name == sharingSource {
-			return nil, errors.New("sharing source already exists; refusing to adopt another process")
+			return nil, errors.New("fonte de compartilhamento já em execução; desative o compartilhamento anterior primeiro")
 		}
 		if n.Name == sink && n.MediaClass == "Audio/Sink" {
 			sinkFound = true
 		}
 	}
 	if !sinkFound {
-		return nil, errors.New("output sink unavailable")
+		return nil, errors.New("saída de áudio selecionada indisponível")
 	}
-	var selected *sharingSession
+
+	var captureStreams []*inspect.NodeInfo
+	for _, n := range g.Nodes {
+		if n == nil || n.MediaClass != "Stream/Input/Audio" {
+			continue
+		}
+		if strings.HasPrefix(n.Name, "ee_") || strings.Contains(strings.ToLower(n.AppName), "easyeffects") {
+			continue
+		}
+		if n.Name == "easyprofile_share_capture" {
+			continue
+		}
+		captureStreams = append(captureStreams, n)
+	}
+
+	if len(captureStreams) == 0 {
+		return nil, errors.New("nenhuma chamada capturando o microfone foi encontrada; abra a chamada antes de compartilhar")
+	}
+	if len(captureStreams) > 1 {
+		return nil, errors.New("múltiplas capturas de áudio detectadas; mantenha apenas a chamada desejada capturando o microfone")
+	}
+
+	stream := captureStreams[0]
+	if stream.Serial <= 0 {
+		return nil, errors.New("identificador da captura indisponível; verifique as permissões e a conexão do PipeWire")
+	}
+
+	var streamLinks []inspect.LinkInfo
+	var hasActiveLink, hasPausedLink bool
 	for _, link := range g.Links {
-		stream, source := g.Nodes[link.InNode], g.Nodes[link.OutNode]
-		if link.State != "active" || stream == nil || source == nil || stream.MediaClass != "Stream/Input/Audio" {
-			continue
-		}
-		if !strings.HasPrefix(source.MediaClass, "Audio/Source") || strings.HasPrefix(stream.Name, "ee_") || strings.Contains(strings.ToLower(stream.AppName), "easyeffects") {
-			continue
-		}
-		if selected != nil {
-			if selected.stream.ID != stream.ID || selected.original.ID != source.ID {
-				return nil, errors.New("multiple capture streams or sources; leave only the intended call capturing audio")
+		if link.InNode == stream.ID {
+			streamLinks = append(streamLinks, link)
+			if link.State == "active" {
+				hasActiveLink = true
+			} else if link.State == "paused" {
+				hasPausedLink = true
 			}
+		}
+	}
+
+	if len(streamLinks) == 0 {
+		return nil, errors.New("captura da chamada ainda não conectada ao áudio do sistema; aguarde a inicialização da chamada")
+	}
+	if !hasActiveLink {
+		if hasPausedLink {
+			return nil, errors.New("a chamada foi detectada, mas sua captura está pausada; ative a entrada de áudio na chamada e tente novamente")
+		}
+		return nil, errors.New("captura da chamada em estado inativo; desmute ou ative o áudio na chamada antes de compartilhar")
+	}
+
+	var selectedSource *inspect.NodeInfo
+	for _, link := range streamLinks {
+		if link.State != "active" {
 			continue
 		}
-		if stream.Serial <= 0 || source.Serial <= 0 {
-			return nil, errors.New("capture identity unavailable")
+		source := g.Nodes[link.OutNode]
+		if source == nil || !strings.HasPrefix(source.MediaClass, "Audio/Source") {
+			return nil, errors.New("captura conectada a uma fonte não reconhecida; certifique-se de que a chamada está vinculada ao microfone")
 		}
-		selected = &sharingSession{stream: *stream, original: *source}
-		if target, ok := g.CaptureTargets[stream.ID]; ok {
-			selected.previous = &target
+		if source.Serial <= 0 {
+			return nil, errors.New("identificador da fonte indisponível ou permissões insuficientes no PipeWire")
 		}
+		if selectedSource != nil && selectedSource.ID != source.ID {
+			return nil, errors.New("múltiplas fontes de áudio conectadas à chamada; mantenha apenas o microfone vinculado")
+		}
+		selectedSource = source
 	}
-	if selected == nil {
-		return nil, errors.New("no active microphone capture; open the call before sharing")
+
+	if selectedSource == nil {
+		return nil, errors.New("nenhuma captura ativa do microfone confirmada; verifique a chamada antes de compartilhar")
 	}
-	return selected, nil
+
+	session := &sharingSession{stream: *stream, original: *selectedSource}
+	if target, ok := g.CaptureTargets[stream.ID]; ok {
+		session.previous = &target
+	}
+	return session, nil
 }
 
 func sameSharingNode(g *inspect.Graph, saved inspect.NodeInfo) bool {
@@ -194,7 +256,7 @@ func (r *RealPipeWire) startOutputSharing(ctx context.Context, sink string) (err
 		}
 	}
 	if r.sharing != nil {
-		return errors.New("sharing or restoration already pending; turn sharing off first")
+		return errors.New("compartilhamento ou restauração já pendente; desative o compartilhamento primeiro")
 	}
 	ctx, cancel := context.WithTimeout(ctx, r.timeout)
 	defer cancel()
@@ -225,11 +287,14 @@ func (r *RealPipeWire) startOutputSharing(ctx context.Context, sink string) (err
 	}()
 	err = waitSharingGraph(ctx, io, func(g *inspect.Graph) (bool, error) {
 		if !sameSharingNode(g, session.stream) {
-			return false, errors.New("capture changed before sharing")
+			return false, errors.New("a captura da chamada foi alterada antes de iniciar o compartilhamento")
 		}
 		for _, n := range g.Nodes {
-			if n.Name == sharingSource {
-				return sharingFeed(g, sink), nil
+			if n.Name == sharingSource && n.Serial > 0 {
+				session.sharedSerial = n.Serial
+				// A passive monitor may activate only after the call is connected.
+				// Source discovery precedes redirection; transport is checked after it.
+				return true, nil
 			}
 		}
 		return false, nil
@@ -238,14 +303,14 @@ func (r *RealPipeWire) startOutputSharing(ctx context.Context, sink string) (err
 		return err
 	}
 	session.changed = true // A failing command can still have changed metadata.
-	if err = io.target(ctx, session.stream.ID, &inspect.TargetMetadata{Value: sharingSource, Type: "Spa:String"}); err != nil {
+	if err = io.target(ctx, session.stream.ID, &inspect.TargetMetadata{Value: strconv.Itoa(session.sharedSerial), Type: "Spa:Id"}); err != nil {
 		return err
 	}
 	return waitSharingGraph(ctx, io, func(g *inspect.Graph) (bool, error) {
 		if !sameSharingNode(g, session.stream) {
-			return false, errors.New("capture disappeared while sharing")
+			return false, errors.New("a chamada desapareceu durante o compartilhamento")
 		}
-		return exclusiveCapture(g, session.stream.ID, sharingSource), nil
+		return exclusiveCapture(g, session.stream.ID, sharingSource) && sharingFeed(g, sink), nil
 	})
 }
 
@@ -286,7 +351,7 @@ func (r *RealPipeWire) stopOutputSharing(ctx context.Context) error {
 		return nil
 	}
 	target, exists := g.CaptureTargets[s.stream.ID]
-	owned := exists && target.Value == sharingSource
+	owned := exists && target.Value == strconv.Itoa(s.sharedSerial)
 	restoring := s.restoring && ((!exists && s.previous == nil) || (exists && s.previous != nil && target == *s.previous))
 	if !owned && !restoring {
 		// Someone changed the stream manually. Do not overwrite that decision.
@@ -294,7 +359,7 @@ func (r *RealPipeWire) stopOutputSharing(ctx context.Context) error {
 		return nil
 	}
 	if !sameSharingNode(g, s.original) {
-		return errors.New("sharing stopped; original input unavailable, restoration pending")
+		return errors.New("compartilhamento encerrado; entrada original indisponível, restauração pendente")
 	}
 	// Restore the previous policy exactly, including absence of target.object.
 	s.restoring = true
@@ -306,7 +371,7 @@ func (r *RealPipeWire) stopOutputSharing(ctx context.Context) error {
 			return true, nil
 		}
 		if !sameSharingNode(g, s.original) {
-			return false, errors.New("original input disappeared during restoration")
+			return false, errors.New("entrada original desapareceu durante a restauração")
 		}
 		return exclusiveCapture(g, s.stream.ID, s.original.Name), nil
 	})
@@ -330,7 +395,7 @@ func (r *RealPipeWire) readOutputSharing(ctx context.Context) (adapters.OutputSh
 		}
 	}
 	state, err := r.sharingTransportState()
-	if err != nil || !state.Active {
+	if err != nil || r.sharing == nil {
 		return state, err
 	}
 	g, err := r.shareBackend().graph(ctx)
@@ -347,21 +412,21 @@ func (r *RealPipeWire) sharingTransportState() (adapters.OutputSharingState, err
 	}
 	select {
 	case <-s.process.done:
-		return adapters.OutputSharingState{RestorePending: true}, errors.New("sharing transport stopped; turn sharing off to finish restoration")
+		return adapters.OutputSharingState{RestorePending: true}, errors.New("transporte de compartilhamento encerrado; desative o compartilhamento para concluir a restauração")
 	default:
 		// Unknown routing must never hide a live transport.
-		return adapters.OutputSharingState{Active: true, RestorePending: true}, nil
+		return adapters.OutputSharingState{RestorePending: true}, nil
 	}
 }
 
 func (r *RealPipeWire) sharingStateFromGraph(g *inspect.Graph) (adapters.OutputSharingState, error) {
 	state, err := r.sharingTransportState()
-	if err != nil || !state.Active {
+	if err != nil || r.sharing == nil {
 		return state, err
 	}
 	s := r.sharing
 	if !sameSharingNode(g, s.stream) || !exclusiveCapture(g, s.stream.ID, sharingSource) || !sharingFeed(g, s.sink) {
-		return state, errors.New("sharing capture route no longer confirmed")
+		return state, errors.New("rota de captura do compartilhamento não mais confirmada")
 	}
 	return adapters.OutputSharingState{Active: true}, nil
 }

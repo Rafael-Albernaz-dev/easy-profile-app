@@ -2,12 +2,46 @@ package pipewire
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/toru/easy-profile-app/internal/inspect"
 )
+
+func TestSharingNegotiatesMonoBeforeLoopbackCopy(t *testing.T) {
+	// Independent backend contract: PipeWire 1.0.5 module-loopback.c
+	// playback_process copies data planes by index, without downmixing.
+	// Both ends must negotiate MONO; the capture adapter does the remix.
+	// This verifies the requested format, not DSP or remote-call reception.
+	captureJSON, playbackJSON := sharingProperties("physical-output")
+	decode := func(raw string) map[string]any {
+		t.Helper()
+		var props map[string]any
+		if err := json.Unmarshal([]byte(raw), &props); err != nil {
+			t.Fatal(err)
+		}
+		return props
+	}
+	capture, playback := decode(captureJSON), decode(playbackJSON)
+	for _, props := range []map[string]any{capture, playback} {
+		channels, ok := props["audio.position"].([]any)
+		if props["audio.channels"] != float64(1) || !ok || len(channels) != 1 || channels[0] != "MONO" {
+			t.Fatalf("loopback would copy incompatible channel layouts: %+v", props)
+		}
+	}
+	if capture["stream.dont-remix"] != false {
+		t.Fatal("physical stereo monitor must be remixed before the mono loopback")
+	}
+	if capture["target.object"] != "physical-output" || capture["stream.capture.sink"] != true || capture["node.passive"] != true || capture["node.dont-fallback"] != true || capture["node.dont-reconnect"] != true {
+		t.Fatalf("monitor targeting/privacy contract changed: %+v", capture)
+	}
+	if playback["media.class"] != "Audio/Source" || playback["node.name"] != sharingSource || playback["node.autoconnect"] != false {
+		t.Fatalf("virtual source must remain explicit and per-call: %+v", playback)
+	}
+}
 
 type sharingRig struct {
 	g                      *inspect.Graph
@@ -62,7 +96,7 @@ func newSharingRig(t *testing.T) *sharingRig {
 				f.g.CaptureTargets[id] = *target
 			}
 			out := 1
-			sharing := target != nil && target.Value == sharingSource
+			sharing := target != nil && target.Value == "44"
 			if sharing {
 				out = 4
 			}
@@ -178,7 +212,7 @@ func TestSharingNeverRestoresReusedStreamID(t *testing.T) {
 	if err := f.r.stopOutputSharing(context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	if f.g.CaptureTargets[2].Value != sharingSource {
+	if f.g.CaptureTargets[2].Value != "44" {
 		t.Fatal("reused stream identity was mutated")
 	}
 }
@@ -287,8 +321,107 @@ func TestSharingReadbackRejectsMixedMicrophoneAndMissingFeed(t *testing.T) {
 			f.g.Links = f.g.Links[:1]
 		}
 		state, err := f.r.readOutputSharing(context.Background())
-		if err == nil || !state.Active || !state.RestorePending {
+		if err == nil || state.Active || !state.RestorePending {
 			t.Fatalf("unconfirmed route hidden: %+v %v", state, err)
 		}
+	}
+}
+
+func TestSharingCandidateGranularDiagnostics(t *testing.T) {
+	// Case 1: No capture stream at all
+	g := &inspect.Graph{
+		Nodes: map[int]*inspect.NodeInfo{
+			1: {ID: 1, Serial: 11, Name: "mic", MediaClass: "Audio/Source/Virtual"},
+			3: {ID: 3, Serial: 33, Name: "output", MediaClass: "Audio/Sink"},
+		},
+		Links: []inspect.LinkInfo{},
+	}
+	_, err := sharingCandidate(g, "output")
+	if err == nil || !strings.Contains(err.Error(), "nenhuma chamada capturando o microfone") {
+		t.Fatalf("expected no capture error, got: %v", err)
+	}
+
+	// Case 2: One capture stream, but link is paused
+	g.Nodes[2] = &inspect.NodeInfo{ID: 2, Serial: 22, Name: "call", MediaClass: "Stream/Input/Audio"}
+	g.Links = []inspect.LinkInfo{{OutNode: 1, InNode: 2, State: "paused"}}
+	_, err = sharingCandidate(g, "output")
+	if err == nil || !strings.Contains(err.Error(), "captura está pausada") {
+		t.Fatalf("expected paused capture error, got: %v", err)
+	}
+
+	// Case 3: One capture stream, but unlinked
+	g.Links = nil
+	_, err = sharingCandidate(g, "output")
+	if err == nil || !strings.Contains(err.Error(), "ainda não conectada") {
+		t.Fatalf("expected unlinked capture error, got: %v", err)
+	}
+
+	// Case 4: Multiple capture streams
+	g.Nodes[4] = &inspect.NodeInfo{ID: 4, Serial: 44, Name: "other-call", MediaClass: "Stream/Input/Audio"}
+	g.Links = []inspect.LinkInfo{
+		{OutNode: 1, InNode: 2, State: "active"},
+		{OutNode: 1, InNode: 4, State: "active"},
+	}
+	_, err = sharingCandidate(g, "output")
+	if err == nil || !strings.Contains(err.Error(), "múltiplas capturas de áudio detectadas") {
+		t.Fatalf("expected multiple captures error, got: %v", err)
+	}
+	delete(g.Nodes, 4)
+
+	// Case 5: Source is not Audio/Source
+	g.Nodes[5] = &inspect.NodeInfo{ID: 5, Serial: 55, Name: "not-a-source", MediaClass: "Stream/Output/Audio"}
+	g.Links = []inspect.LinkInfo{{OutNode: 5, InNode: 2, State: "active"}}
+	_, err = sharingCandidate(g, "output")
+	if err == nil || !strings.Contains(err.Error(), "fonte não reconhecida") {
+		t.Fatalf("expected unrecognized source error, got: %v", err)
+	}
+	delete(g.Nodes, 5)
+
+	// Case 6: Missing serial / permissions
+	g.Nodes[2].Serial = 0
+	g.Links = []inspect.LinkInfo{{OutNode: 1, InNode: 2, State: "active"}}
+	_, err = sharingCandidate(g, "output")
+	if err == nil || !strings.Contains(err.Error(), "identificador da captura indisponível") {
+		t.Fatalf("expected missing serial error, got: %v", err)
+	}
+	g.Nodes[2].Serial = 22
+
+	// Case 7: Valid active capture
+	session, err := sharingCandidate(g, "output")
+	if err != nil || session == nil || session.stream.ID != 2 || session.original.ID != 1 {
+		t.Fatalf("expected valid candidate, got session=%v err=%v", session, err)
+	}
+}
+
+func TestSharingPassiveFeedActivatesOnlyAfterConsumer(t *testing.T) {
+	f := newSharingRig(t)
+	start := f.r.sharingIO.start
+	f.r.sharingIO.start = func(sink string) (*sharingProcess, error) {
+		p, e := start(sink)
+		f.g.Links[1].State = "paused"
+		return p, e
+	}
+	if err := f.r.startOutputSharing(context.Background(), "output"); err != nil {
+		t.Fatal(err)
+	}
+	if !sharingFeed(f.g, "output") {
+		t.Fatal("transport not active")
+	}
+}
+func TestSharingPausedFeedNeverReportsActive(t *testing.T) {
+	f := newSharingRig(t)
+	target := f.r.sharingIO.target
+	f.r.sharingIO.target = func(ctx context.Context, id int, v *inspect.TargetMetadata) error {
+		err := target(ctx, id, v)
+		if v != nil && v.Value == "44" {
+			f.g.Links[1].State = "paused"
+		}
+		return err
+	}
+	if err := f.r.startOutputSharing(context.Background(), "output"); !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatal(err)
+	}
+	if f.r.sharing != nil {
+		t.Fatal("failed transport not cleaned")
 	}
 }

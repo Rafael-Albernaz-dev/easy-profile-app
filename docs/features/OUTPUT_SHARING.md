@@ -9,14 +9,21 @@ Não há mistura com a voz do microfone.
 CLI equivalente: `easyprofilectl share on`, `easyprofilectl share off` ou
 `easyprofilectl share toggle`. `status --json` inclui `output_sharing` e
 `output_sharing_restore_pending`. A Top Bar indica **COMPARTILHANDO** enquanto ativo.
-Nenhum atalho existente é remapeado.
+Numpad8 alterna o modo com NumLock no modo áudio.
 
 ## Condições e comportamento
 
 - Captura toda a saída do destino selecionado, incluindo notificações e a voz dos
   participantes. O retorno digital da chamada é uma limitação aceita deste modo.
 - Abra a chamada antes de ativar. É necessário haver exatamente um stream externo
-  de captura de microfone ativo. Capturas múltiplas/ambíguas são recusadas.
+  de captura de microfone ativo. O seletor diagnostica granularmente o estado da topologia
+  e emite instruções claras em português:
+  - Nenhuma captura: *nenhuma chamada capturando o microfone foi encontrada; abra a chamada antes de compartilhar*
+  - Captura pausada (não comprova mute no aplicativo): *a chamada foi detectada, mas sua captura está pausada; ative a entrada de áudio na chamada e tente novamente*
+  - Captura não conectada: *captura da chamada ainda não conectada ao áudio do sistema; aguarde a inicialização da chamada*
+  - Múltiplas capturas/ambiguidade: *múltiplas capturas de áudio detectadas; mantenha apenas a chamada desejada capturando o microfone*
+  - Fonte não reconhecida: *captura conectada a uma fonte não reconhecida; certifique-se de que a chamada está vinculada ao microfone*
+  - Permissões/serial ausente: *identificador da captura indisponível ou permissões insuficientes no PipeWire*
 - A operação não muda a entrada padrão global, volumes, mutes físicos/virtuais ou
   presets. O áudio é copiado do monitor da saída física, após o DSP de saída.
 - Desligue a escuta do microfone antes de compartilhar. Os dois modos são
@@ -115,3 +122,70 @@ Não houve restart de serviço nem ativação da feature em áudio real nesta en
 Com NumLock no modo áudio, `8` chama `ToggleOutputSharing`, com
 `IGNORE_AUTOREPEAT`. O botão do menu e `share on|off|toggle` continuam disponíveis.
 O mesmo toggle encerra uma sessão ativa ou tenta concluir uma restauração pendente.
+
+## Diagnóstico atual do WhatsApp e inicialização
+
+A falha de recepção relatada no WhatsApp **não tem causa confirmada**. Um grafo
+sem captura em outro instante não explica a chamada anterior; links pausados não
+provam que o usuário estava mutado. Filtros WebRTC também são hipótese, sem prova
+nesta sessão. O teste acompanhado deve registrar a captura/serial, seus links,
+metadata target.object e recepção remota antes/durante/depois do toggle.
+
+A inicialização agora espera a fonte virtual existir, redireciona somente a captura
+selecionada usando seu destino por serial e só aceita ON depois de confirmar
+monitor físico -> loopback ativo e fonte virtual -> captura ativa/exclusiva.
+Um feed passivo pausado não bloqueia a descoberta inicial, nem serve de prova
+final de transporte. Captura e fonte negociam o mesmo formato MONO, com remix
+habilitado na captura para combinar FL/FR do monitor físico antes do loopback.
+No [PipeWire 1.0.5](https://github.com/PipeWire/pipewire/blob/1.0.5/src/modules/module-loopback.c#L245-L289),
+o loopback copia os canais por índice; pedir FL/FR na captura e MONO na fonte
+descartava FR em vez de fazer downmix. Esse defeito foi identificado na revisão
+do código; não comprova a causa do silêncio total relatado no WhatsApp.
+O teste hermético verifica os formatos solicitados e as proteções de rota,
+sem executar áudio real. Negociação, ambos os canais e recepção remota ainda
+precisam de validação acompanhada.
+
+Ausência de confirmação publica output_sharing=false e restauração pendente se
+houver transporte/política a limpar. Não há seleção automática de novos apps.
+A restauração preserva o metadata anterior exato e não toca IDs reutilizados.
+PTT também é incompatível com compartilhamento. O indicador prova uma rota de
+transporte confirmada, não recepção do interlocutor nem conteúdo audível.
+
+## Reteste acompanhado no WhatsApp — 20/10/2026
+
+O binário com captura e fonte MONO foi instalado (`68ca22dc…`). O usuário
+confirmou voz normal antes de ligar `8`; com compartilhamento ligado, ele ouvia
+o áudio do computador, mas o interlocutor recebia silêncio. A homologação
+continua **reprovada**, apesar de `output_sharing=true` e dos links ativos.
+
+O snapshot confirmou monitor físico -> loopback e fonte virtual -> captura
+Chrome ativa e exclusiva. Medição curta autorizada encontrou sinal não nulo
+no monitor e na fonte virtual, sem guardar gravação. As amostras cobrem somente
+0,192s/0,373s; não comprovam continuidade, processamento interno do navegador
+ou entrega remota. Cancelamento de eco/redução de ruído seguem hipóteses.
+
+Ao usuário fechar a chamada, a reconciliação encerrou o transporte e removeu
+a fonte temporária: compartilhamento e restauração pendente ficaram desligados,
+com os três mutes preservados. Não havia capturas externas no snapshot final.
+Comparação do mesmo trecho falado em player local e navegador ainda está pendente.
+O contrato foi reconfirmado: somente áudio do computador, sem misturar microfone.
+
+## Reteste com VLC e limitação aceita pelo usuário
+
+Em uma segunda chamada, o usuário confirmou que o interlocutor ouviu os áudios
+reproduzidos no VLC. A reprodução no Chrome não chegou, mesmo com WhatsApp e
+reprodução em perfis diferentes do mesmo Chrome. Isso valida recepção pelo
+caminho do VLC nessa chamada, sem certificar todos os players ou navegadores.
+O observador de topologia não cobriu o trecho VLC; não se declara comparação
+simultânea de rotas ou uma causa confirmada de cancelamento de eco.
+
+O usuário optou por manter a implementação atual e usar reprodução local quando
+necessário. Compatibilidade com áudio do Chrome fica como limitação conhecida,
+com investigação adiada. A feature continua capturando o monitor completo;
+não há filtro que selecione apenas VLC e não se mistura voz do microfone.
+Baixar um arquivo e reproduzi-lo no VLC é uma alternativa coerente com o teste,
+sem garantia universal para qualquer arquivo/player/sessão.
+
+Continuam pendentes em hardware as provas de restauração ao desligar `8` com a
+chamada ainda aberta e de interrupção por mute/pânico/Reset/troca de saída.
+O encerramento automático quando a chamada desapareceu foi observado.

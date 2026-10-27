@@ -87,7 +87,7 @@ func TestObservationFailureCannotHideLiveSharingTransport(t *testing.T) {
 		t.Fatal("failed graph read was hidden")
 	}
 	obs, _ := f.r.readObservation(context.Background(), "sink", "source", "physical", "mic", func(context.Context) (*inspect.Graph, error) { return nil, errors.New("still unavailable") })
-	if !obs.Sharing.Active || !obs.Sharing.RestorePending || obs.MicMonitoringKnown {
+	if obs.Sharing.Active || !obs.Sharing.RestorePending || obs.MicMonitoringKnown {
 		t.Fatal("failed read hid the live sharing transport")
 	}
 }
