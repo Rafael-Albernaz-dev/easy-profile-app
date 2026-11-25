@@ -21,6 +21,7 @@ type AudioController struct {
 	pttRecovery           bool
 	mu                    sync.RWMutex
 	destinations          map[DestinationID]*Destination
+	destinationOrder      []DestinationID
 	activeDestination     DestinationID
 	portMemory            map[DestinationID]PortSessionState
 	outputMuted           bool
@@ -48,25 +49,42 @@ func NewAudioControllerWithDestinations(akg, sp166 *Destination) *AudioControlle
 	return newAudioController(nil, akg, sp166)
 }
 
+// NewAudioControllerWithList constructs a controller for an ordered list of destinations.
+func NewAudioControllerWithList(dests ...*Destination) *AudioController {
+	return newAudioController(nil, dests...)
+}
+
 // NewSessionController restores only this graphical session, with configured destinations.
 // A corrupt store is an initialization error, never permission to apply default gains.
 func NewSessionController(store *SessionStore, sessionID string, akg, sp166 *Destination) (*AudioController, error) {
-	c := newAudioController(nil, akg, sp166)
+	return NewSessionControllerWithList(store, sessionID, akg, sp166)
+}
+
+// NewSessionControllerWithList restores only this graphical session for an ordered list of destinations.
+func NewSessionControllerWithList(store *SessionStore, sessionID string, dests ...*Destination) (*AudioController, error) {
+	c := newAudioController(nil, dests...)
 	c.store, c.sessionID = store, sessionID
 	data, err := store.Load()
 	if err != nil {
 		return nil, err
 	}
 	if data != nil && data.SessionID == sessionID {
-		if data.ActiveDestination != DestAKG && data.ActiveDestination != DestSP166 {
+		if _, ok := c.destinations[data.ActiveDestination]; !ok {
 			return nil, fmt.Errorf("invalid saved destination %q", data.ActiveDestination)
 		}
-		if data.MicLevelPct < 0 || data.MicLevelPct > 100 || len(data.Ports) != 2 {
+		if data.MicLevelPct < 0 || data.MicLevelPct > 100 || len(data.Ports) < 2 {
 			return nil, fmt.Errorf("invalid saved session levels/ports")
 		}
-		for _, dest := range []*Destination{akg, sp166} {
+		for _, dest := range dests {
 			port, ok := data.Ports[dest.ID]
-			if !ok || port.VirtualVolume < 0 || port.VirtualVolume > 100 || !dest.IsPresetCompatible(port.ActivePreset) {
+			if !ok {
+				// Allow upgrading an existing 2-destination session (akg/sp166) when tv is newly configured.
+				if dest.ID == DestTV {
+					continue
+				}
+				return nil, fmt.Errorf("invalid saved port state for %s", dest.ID)
+			}
+			if port.VirtualVolume < 0 || port.VirtualVolume > 100 || !dest.IsPresetCompatible(port.ActivePreset) {
 				return nil, fmt.Errorf("invalid saved port state for %s", dest.ID)
 			}
 		}
@@ -98,25 +116,33 @@ func (c *AudioController) PersistenceError() error {
 	defer c.mu.RUnlock()
 	return c.persistenceErr
 }
-func newAudioController(store *SessionStore, akg, sp166 *Destination) *AudioController {
+func newAudioController(store *SessionStore, dests ...*Destination) *AudioController {
 	defaultVol := NewPercentageLevel(95)
 
+	destinations := make(map[DestinationID]*Destination, len(dests))
+	order := make([]DestinationID, 0, len(dests))
+	portMemory := make(map[DestinationID]PortSessionState, len(dests))
+	for _, d := range dests {
+		if d == nil {
+			continue
+		}
+		destinations[d.ID] = d
+		order = append(order, d.ID)
+		portMemory[d.ID] = PortSessionState{
+			VirtualVolume: defaultVol.Percent(),
+			ActivePreset:  d.BasePreset,
+		}
+	}
+	active := DestAKG
+	if _, ok := destinations[active]; !ok && len(order) > 0 {
+		active = order[0]
+	}
+
 	c := &AudioController{
-		destinations: map[DestinationID]*Destination{
-			DestAKG:   akg,
-			DestSP166: sp166,
-		},
-		activeDestination: DestAKG,
-		portMemory: map[DestinationID]PortSessionState{
-			DestAKG: {
-				VirtualVolume: defaultVol.Percent(),
-				ActivePreset:  akg.BasePreset,
-			},
-			DestSP166: {
-				VirtualVolume: defaultVol.Percent(),
-				ActivePreset:  sp166.BasePreset,
-			},
-		},
+		destinations:         destinations,
+		destinationOrder:     order,
+		activeDestination:    active,
+		portMemory:           portMemory,
 		outputMuted:          false,
 		volumeStepPercent:    1,
 		defaultVirtualVolume: defaultVol,
@@ -196,6 +222,15 @@ func (c *AudioController) ActiveDestination() *Destination {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 	return cloneDestination(c.destinations[c.activeDestination])
+}
+
+// DestinationIDs returns the ordered list of configured destination IDs.
+func (c *AudioController) DestinationIDs() []DestinationID {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	out := make([]DestinationID, len(c.destinationOrder))
+	copy(out, c.destinationOrder)
+	return out
 }
 
 // Destination retrieves a specific destination by ID.
@@ -302,14 +337,21 @@ func (c *AudioController) SwitchDestination(target DestinationID) (*Destination,
 	return cloneDestination(dest), state, nil
 }
 
-// ToggleDestination switches between AKG headphones and SP166 speakers.
+// ToggleDestination cycles through the configured output destinations.
 func (c *AudioController) ToggleDestination() (*Destination, PortSessionState) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
-	target := DestAKG
-	if c.activeDestination == DestAKG {
-		target = DestSP166
+	target := c.activeDestination
+	if len(c.destinationOrder) > 0 {
+		idx := 0
+		for i, id := range c.destinationOrder {
+			if id == c.activeDestination {
+				idx = (i + 1) % len(c.destinationOrder)
+				break
+			}
+		}
+		target = c.destinationOrder[idx]
 	}
 	c.activeDestination = target
 	state := c.portMemory[target]

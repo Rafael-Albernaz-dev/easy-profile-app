@@ -161,8 +161,23 @@ export default class EasyProfileExtension extends Extension {
             this._updateLabel();
         });
 
+        this._btnTV = new St.Button({
+            label: '📺 TV',
+            style_class: 'button',
+            can_focus: true,
+            x_expand: true,
+        });
+        this._btnTV.connect('clicked', () => {
+            this._targetChannel = 'out';
+            if (this._status?.active_destination?.id !== 'tv') {
+                this._callDBus('SelectDestination', ['tv']);
+            }
+            this._updateLabel();
+        });
+
         this._routeBox.add_child(this._btnAKG);
         this._routeBox.add_child(this._btnSP166);
+        this._routeBox.add_child(this._btnTV);
         this._menu.box.add_child(this._routeBox);
 
         this._menu.addMenuItem(new PopupMenu.PopupSeparatorMenuItem());
@@ -386,25 +401,23 @@ export default class EasyProfileExtension extends Extension {
             if (prev) {
                 const destChanged = prev.active_destination?.id !== s.active_destination?.id;
                 const presetChanged = prev.active_preset && s.active_preset && prev.active_preset !== s.active_preset;
+                const meta = this._destMeta(s.active_destination?.id);
                 if (destChanged) {
-                    const isAKG = s.active_destination?.id === 'akg';
-                    const icon = isAKG ? 'audio-headphones-symbolic' : 'audio-speakers-symbolic';
-                    const name = s.active_destination?.display_name || (isAKG ? 'Fone AKG K52' : 'Caixas SP166');
+                    const name = s.active_destination?.display_name || meta.displayName;
                     const presetInfo = s.active_preset ? `\nPreset: ${s.active_preset}` : '';
-                    this._showOSD(`${name}${presetInfo}`, icon, 2000);
+                    this._showOSD(`${name}${presetInfo}`, meta.icon, 2000);
                 } else if (presetChanged) {
-                    const isAKG = s.active_destination?.id === 'akg';
-                    const icon = isAKG ? 'audio-headphones-symbolic' : 'audio-speakers-symbolic';
                     const presets = s.available_presets || [];
                     const idx = presets.indexOf(s.active_preset);
                     const counter = idx >= 0 ? ` (${idx + 1}/${presets.length})` : '';
-                    this._showOSD(`🎛️ Preset${counter}\n${s.active_preset}`, icon, 2000);
+                    this._showOSD(`🎛️ Preset${counter}\n${s.active_preset}`, meta.icon, 2000);
                 }
             }
 
             // 1. Update Top Bar Icon & Label
-            const isAKG = s.active_destination.id === 'akg';
-            let iconName = isAKG ? 'audio-headphones-symbolic' : 'audio-speakers-symbolic';
+            const destId = s.active_destination.id;
+            const meta = this._destMeta(destId);
+            let iconName = meta.icon;
             if (this._muteBadge) this._muteBadge.visible = Boolean(s.observed_output_mute);
             if (this._micMuteBadge) this._micMuteBadge.visible = Boolean(s.mic_privacy_muted || s.mic_virtual_muted || s.mic_physical_muted);
             if (this._listenBadge) this._listenBadge.visible = Boolean(s.mic_monitoring);
@@ -413,12 +426,10 @@ export default class EasyProfileExtension extends Extension {
             this._updateLabel();
 
             // 2. Update Route Buttons Styling
-            if (isAKG) {
-                this._btnAKG.add_style_pseudo_class('active');
-                this._btnSP166.remove_style_pseudo_class('active');
-            } else {
-                this._btnSP166.add_style_pseudo_class('active');
-                this._btnAKG.remove_style_pseudo_class('active');
+            for (const [id, btn] of [['akg', this._btnAKG], ['sp166', this._btnSP166], ['tv', this._btnTV]]) {
+                if (!btn) continue;
+                if (destId === id) btn.add_style_pseudo_class('active');
+                else btn.remove_style_pseudo_class('active');
             }
 
             // 3. Update Sliders (without re-triggering remote calls)
@@ -508,10 +519,15 @@ export default class EasyProfileExtension extends Extension {
         });
     }
 
+    _destMeta(destId) {
+        if (destId === 'akg') return {icon: 'audio-headphones-symbolic', shortLabel: 'AKG', displayName: 'Fone AKG K52'};
+        if (destId === 'tv') return {icon: 'video-display-symbolic', shortLabel: 'TV', displayName: 'TV Panasonic'};
+        return {icon: 'audio-speakers-symbolic', shortLabel: 'SP166', displayName: 'Caixas SP166'};
+    }
+
     _updateLabel() {
         if (!this._status) return;
-        const isAKG = this._status.active_destination?.id === 'akg';
-        const destShort = isAKG ? 'AKG' : 'SP166';
+        const destShort = this._destMeta(this._status.active_destination?.id).shortLabel;
         const numLockOn = this._keymap ? Boolean(this._keymap.get_num_lock_state()) : false;
         const modeMarker = numLockOn ? '⚡' : '';
         const observeMarker = this._status.observe_only ? ' (observação)' : '';
@@ -543,8 +559,7 @@ export default class EasyProfileExtension extends Extension {
         if (this._status?.active_preset !== basePreset) {
             this._callDBus('SelectPreset', [basePreset]);
         } else {
-            const isAKG = this._status?.active_destination?.id === 'akg';
-            const icon = isAKG ? 'audio-headphones-symbolic' : 'audio-speakers-symbolic';
+            const icon = this._destMeta(this._status?.active_destination?.id).icon;
             this._showOSD(`🎛️ Preset Base (já ativo)\n${basePreset}`, icon, 2000);
         }
     }
@@ -552,8 +567,7 @@ export default class EasyProfileExtension extends Extension {
     _cyclePreset(delta) {
         const presets = this._status?.available_presets;
         if (!presets || presets.length === 0) return;
-        const isAKG = this._status?.active_destination?.id === 'akg';
-        const icon = isAKG ? 'audio-headphones-symbolic' : 'audio-speakers-symbolic';
+        const icon = this._destMeta(this._status?.active_destination?.id).icon;
         if (presets.length === 1) {
             this._showOSD(`🎛️ Preset Único (1/1)\n${presets[0]}`, icon, 2000);
             return;
@@ -757,7 +771,19 @@ export default class EasyProfileExtension extends Extension {
                 this._updateLabel();
             }},
 
-            // 8) TECLA "3": seleciona o microfone para ajuste com "+" ou "-"
+            // 5) TECLA "3": seleciona a TV Panasonic (HDMI) e restaura foco para saída
+            {name: 'shortcut-dest-tv', flags: noRepeat, handler: () => {
+                this._targetChannel = 'out';
+                if (this._status?.active_destination?.id !== 'tv') {
+                    this._callDBus('SelectDestination', ['tv']);
+                } else {
+                    const preset = this._status?.active_preset ? `\nPreset: ${this._status.active_preset}` : '';
+                    this._showOSD(`TV Panasonic (ativo)${preset}`, 'video-display-symbolic', 2000);
+                }
+                this._updateLabel();
+            }},
+
+            // 8) TECLA "*": seleciona o microfone para ajuste com "+" ou "-"
             {name: 'shortcut-select-mic', flags: noRepeat, handler: () => {
                 this._targetChannel = (this._targetChannel === 'mic') ? 'out' : 'mic';
                 const isMic = this._targetChannel === 'mic';
@@ -814,15 +840,6 @@ export default class EasyProfileExtension extends Extension {
                     this._endKeyHold();
                     this._callDBus('SetPushToTalk', [false]);
                 } else this._beginKeyHold('mode');
-            }},
-
-            // '*' restores daily levels/preset while preserving mic mutes; no restart.
-            {name: 'shortcut-reset-app', flags: noRepeat, handler: () => {
-                this._callDBus('ResetDefaults', [], err => {
-                    if (!err) {
-                        this._showOSD('✓ Padrão Diário Restaurado\nAKG K52 (95%) • Mic (100%)', 'audio-headphones-symbolic', 2000);
-                    }
-                });
             }},
 
             // 14) TECLA "7": escutar microfone com os filtros (Toggle)

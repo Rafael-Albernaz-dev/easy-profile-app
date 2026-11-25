@@ -114,6 +114,12 @@ func CompatibleDestinations(presetName string) []string {
 			break
 		}
 	}
+	for _, p := range []string{"TV", "[TV]", "PANASONIC"} {
+		if strings.HasPrefix(upper, p) {
+			out = append(out, "tv")
+			break
+		}
+	}
 	return out
 }
 

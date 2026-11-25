@@ -86,31 +86,32 @@ type request struct {
 // Daemon has one hardware writer. Panic cancels an in-flight command and runs
 // ahead of queued normal work. Every interrupted route remains physically muted.
 type Daemon struct {
-	talkPressed        bool
-	talkEpoch          uint32
-	talkSequence       uint32
-	talkTimer          *time.Timer
-	hardware           Config
-	activePanic        bool
-	panicSnapshotKnown bool
-	presets            []string
-	mu                 sync.Mutex
-	ctrl               *domain.AudioController
-	pw                 adapters.PipeWirePort
-	alsa               adapters.AlsaPort
-	ee                 adapters.EasyEffectsPort
-	conn               *dbus.Conn
-	status             DaemonStatus
-	statusJSON         atomic.Value // immutable string; GetStatus never takes the hardware lock
-	observeOnly        bool
-	stabilization      time.Duration
-	sessionTracker     SessionTracker
-	qmu                sync.Mutex
-	wake               *sync.Cond
-	queue              []*request
-	activeCancel       context.CancelFunc
-	stopped            bool
-	done               chan struct{}
+	talkPressed         bool
+	talkEpoch           uint32
+	talkSequence        uint32
+	talkTimer           *time.Timer
+	hardware            Config
+	activePanic         bool
+	panicSnapshotKnown  bool
+	failSafeOutputMuted bool
+	presets             []string
+	mu                  sync.Mutex
+	ctrl                *domain.AudioController
+	pw                  adapters.PipeWirePort
+	alsa                adapters.AlsaPort
+	ee                  adapters.EasyEffectsPort
+	conn                *dbus.Conn
+	status              DaemonStatus
+	statusJSON          atomic.Value // immutable string; GetStatus never takes the hardware lock
+	observeOnly         bool
+	stabilization       time.Duration
+	sessionTracker      SessionTracker
+	qmu                 sync.Mutex
+	wake                *sync.Cond
+	queue               []*request
+	activeCancel        context.CancelFunc
+	stopped             bool
+	done                chan struct{}
 }
 
 func NewDaemon(ctrl *domain.AudioController, pw adapters.PipeWirePort, alsa adapters.AlsaPort, ee adapters.EasyEffectsPort) *Daemon {
@@ -207,7 +208,7 @@ func (d *Daemon) worker() {
 				d.queue = d.queue[1:]
 			}
 		}
-		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		ctx, cancel := context.WithTimeout(context.Background(), 25*time.Second)
 		d.activeCancel = cancel
 		d.activePanic = r.panic
 		d.qmu.Unlock()
@@ -451,23 +452,35 @@ func (d *Daemon) InitHardware(ctx context.Context) error {
 			return errors.Join(initialErr, errors.New("initial mute/USB identity readback incomplete"))
 		}
 
-		route, err := d.pw.GetSinkPort(c, d.ctrl.ActiveDestination().PhysicalSinkName)
-		d.status.ObservedDestination = route
-		if err != nil {
-			return err
-		}
 		target := domain.DestUnknown
-		for _, id := range []domain.DestinationID{domain.DestAKG, domain.DestSP166} {
+		devices, _ := d.ee.ReadDevices(c)
+		routeBySink := map[string]string{}
+		for _, id := range d.ctrl.DestinationIDs() {
 			dest, err := d.ctrl.Destination(id)
 			if err != nil {
 				return err
 			}
-			if route == dest.RouteName {
+			sinkRoute, ok := routeBySink[dest.PhysicalSinkName]
+			if !ok {
+				sinkRoute, err = d.pw.GetSinkPort(c, dest.PhysicalSinkName)
+				if err != nil {
+					if dest.ID == d.ctrl.ActiveDestination().ID {
+						return err
+					}
+					continue
+				}
+				routeBySink[dest.PhysicalSinkName] = sinkRoute
+			}
+			if sinkRoute == dest.RouteName && (devices.Output == "" || devices.Output == dest.PhysicalSinkName || dest.ID == d.ctrl.ActiveDestination().ID) {
 				target = id
+				d.status.ObservedDestination = sinkRoute
+				if devices.Output == dest.PhysicalSinkName {
+					break
+				}
 			}
 		}
 		if target == domain.DestUnknown {
-			return fmt.Errorf("unsupported active route %q", route)
+			return fmt.Errorf("unsupported active route %q", d.status.ObservedDestination)
 		}
 		if d.observeOnly {
 			_, _, err := d.ctrl.SwitchDestination(target)
@@ -587,9 +600,21 @@ func (d *Daemon) applyMutes(ctx context.Context) error {
 	return errors.Join(a, b, c)
 }
 func (d *Daemon) applyDestination(ctx context.Context, dest *domain.Destination) (err error) {
-	// Keep the hardware sink muted until route, inactive pins, DSP and session levels are ready.
+	// Keep the hardware sink and any other configured physical sinks muted until route, ALSA pins, DSP and session levels are ready.
 	if err = d.mute(ctx, dest.PhysicalSinkName, true, nil); err != nil {
 		return err
+	}
+	mutedOtherSinks := map[string]struct{}{dest.PhysicalSinkName: {}}
+	for _, id := range d.ctrl.DestinationIDs() {
+		other, oErr := d.ctrl.Destination(id)
+		if oErr != nil || other.PhysicalSinkName == "" {
+			continue
+		}
+		if _, seen := mutedOtherSinks[other.PhysicalSinkName]; seen {
+			continue
+		}
+		mutedOtherSinks[other.PhysicalSinkName] = struct{}{}
+		_ = d.pw.SetNodeMute(ctx, other.PhysicalSinkName, true)
 	}
 	defer func() {
 		if err != nil {
@@ -598,7 +623,11 @@ func (d *Daemon) applyDestination(ctx context.Context, dest *domain.Destination)
 			err = errors.Join(err, d.pw.SetNodeMute(safe, dest.PhysicalSinkName, true))
 		}
 	}()
-	for _, pin := range []string{dest.AlsaActiveControl, dest.AlsaInactiveControl} {
+	alsaPinsToMute := []string{"Headphone", "Front"}
+	if dest.AlsaActiveControl != "" && dest.AlsaInactiveControl != "" {
+		alsaPinsToMute = []string{dest.AlsaActiveControl, dest.AlsaInactiveControl}
+	}
+	for _, pin := range alsaPinsToMute {
 		if err = d.alsa.SetControl(ctx, d.hardware.AlsaCard, pin, 0, true); err != nil {
 			return err
 		}
@@ -646,12 +675,20 @@ func (d *Daemon) applyDestination(ctx context.Context, dest *domain.Destination)
 	if route != dest.RouteName {
 		return errors.New("route readback mismatch")
 	}
-	// Route changes can rewrite ALSA; reassert the inactive pin after switching.
-	if err = d.alsa.SetControl(ctx, d.hardware.AlsaCard, dest.AlsaInactiveControl, 0, true); err != nil {
-		return err
-	}
-	if err = d.alsa.SetControl(ctx, d.hardware.AlsaCard, dest.AlsaActiveControl, 100, false); err != nil {
-		return err
+	// Route changes can rewrite ALSA; reassert the inactive pin(s) after switching.
+	if dest.AlsaActiveControl != "" && dest.AlsaInactiveControl != "" {
+		if err = d.alsa.SetControl(ctx, d.hardware.AlsaCard, dest.AlsaInactiveControl, 0, true); err != nil {
+			return err
+		}
+		if err = d.alsa.SetControl(ctx, d.hardware.AlsaCard, dest.AlsaActiveControl, 100, false); err != nil {
+			return err
+		}
+	} else {
+		for _, pin := range []string{"Headphone", "Front"} {
+			if err = d.alsa.SetControl(ctx, d.hardware.AlsaCard, pin, 0, true); err != nil {
+				return err
+			}
+		}
 	}
 	if err = d.pw.SetNodeVolume(ctx, dest.PhysicalSinkName, dest.PhysicalCeiling.LinearRatio()); err != nil {
 		return err
@@ -687,8 +724,16 @@ func (d *Daemon) applyDestination(ctx context.Context, dest *domain.Destination)
 	if err = d.applyMutes(ctx); err != nil {
 		return err
 	}
-	if err = d.alsa.SetControl(ctx, d.hardware.AlsaCard, dest.AlsaInactiveControl, 0, true); err != nil {
-		return err
+	if dest.AlsaInactiveControl != "" {
+		if err = d.alsa.SetControl(ctx, d.hardware.AlsaCard, dest.AlsaInactiveControl, 0, true); err != nil {
+			return err
+		}
+	} else {
+		for _, pin := range []string{"Headphone", "Front"} {
+			if err = d.alsa.SetControl(ctx, d.hardware.AlsaCard, pin, 0, true); err != nil {
+				return err
+			}
+		}
 	}
 	if err = d.refresh(ctx); err != nil {
 		return err
@@ -696,6 +741,7 @@ func (d *Daemon) applyDestination(ctx context.Context, dest *domain.Destination)
 	if !d.status.DSPBound || !d.status.MonitorVolumesConfirmed {
 		return errors.New("DSP chain not confirmed; hardware remains muted")
 	}
+	d.failSafeOutputMuted = false
 	return d.mute(ctx, dest.PhysicalSinkName, d.ctrl.OutputMuted(), nil)
 }
 
@@ -779,7 +825,7 @@ func (d *Daemon) SetVolumeAbsolute(v int32) (int32, *dbus.Error) {
 
 // SetVolumeForDestination prevents a delayed UI call from changing another route.
 func (d *Daemon) SetVolumeForDestination(destination string, v int32) (int32, *dbus.Error) {
-	if destination != "akg" && destination != "sp166" {
+	if _, err := d.ctrl.Destination(domain.DestinationID(destination)); err != nil {
 		return 0, dbus.MakeFailedError(domain.ErrUnknownDestination)
 	}
 	level := &levelRequest{value: int(v), absolute: true, destination: destination}
@@ -808,6 +854,7 @@ func (d *Daemon) ToggleOutputMute() (bool, *dbus.Error) {
 			d.ctrl.ToggleOutputMute()
 		}
 		value = d.ctrl.ToggleOutputMute()
+		d.failSafeOutputMuted = false
 		return errors.Join(d.mute(ctx, d.hardware.VirtualSink, value, &d.status.ObservedOutputMute), d.mute(ctx, d.ctrl.ActiveDestination().PhysicalSinkName, value, nil))
 	})
 	return value, err
@@ -903,9 +950,14 @@ func (d *Daemon) SelectDestination(name string) *dbus.Error {
 func (d *Daemon) ToggleDestination() (string, *dbus.Error) {
 	var value string
 	err := d.execute(false, func(ctx context.Context) error {
-		value = "akg"
-		if d.ctrl.ActiveDestination().ID == domain.DestAKG {
-			value = "sp166"
+		ids := d.ctrl.DestinationIDs()
+		active := d.ctrl.ActiveDestination().ID
+		value = string(domain.DestAKG)
+		for i, id := range ids {
+			if id == active && len(ids) > 0 {
+				value = string(ids[(i+1)%len(ids)])
+				break
+			}
 		}
 		return d.selectDestination(ctx, value)
 	})
@@ -996,9 +1048,11 @@ func (d *Daemon) Reconcile() *dbus.Error {
 			repaired = true
 		}
 		if d.status.ObservedDestination != d.ctrl.ActiveDestination().RouteName {
+			d.failSafeOutputMuted = true
 			return errors.Join(err, d.pw.SetNodeMute(ctx, d.ctrl.ActiveDestination().PhysicalSinkName, true), errors.New("external output route changed; select destination explicitly"))
 		}
 		if d.status.ObservedMicVirtualMute == nil || d.status.ObservedMicPhysicalMute == nil || d.status.ObservedOutputMute == nil {
+			d.failSafeOutputMuted = true
 			return errors.Join(err, d.pw.SetNodeMute(ctx, d.ctrl.ActiveDestination().PhysicalSinkName, true),
 				d.pw.SetNodeMute(ctx, d.hardware.PhysicalMicrophonePrefix, true), errors.New("mute observation incomplete; fail-safe mute requested"))
 		}
@@ -1017,6 +1071,13 @@ func (d *Daemon) Reconcile() *dbus.Error {
 			if muteErr := d.applyMutes(ctx); muteErr != nil {
 				return errors.Join(err, muteErr)
 			}
+			repaired = true
+		}
+		if d.failSafeOutputMuted && !d.ctrl.OutputMuted() && !d.ctrl.PanicState().Active && d.status.DSPBound && d.status.MonitorVolumesConfirmed {
+			if unmuteErr := d.mute(ctx, d.ctrl.ActiveDestination().PhysicalSinkName, false, nil); unmuteErr != nil {
+				return errors.Join(err, unmuteErr)
+			}
+			d.failSafeOutputMuted = false
 			repaired = true
 		}
 		if d.status.ObservedPreset == "" || d.status.ObservedPreset != d.ctrl.ActiveOutputPreset() {

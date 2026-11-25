@@ -113,7 +113,7 @@ function extension() {
     for (const [name, {flags}] of bindings) {
         assert.equal(flags, name === 'shortcut-volume-up' || name === 'shortcut-volume-down' ? 0 : 1);
     }
-    bindings.get('shortcut-reset-app').handler(); assert.equal(actions[0][0], 'ResetDefaults');
+    bindings.get('shortcut-dest-tv').handler(); assert.equal(actions[0][0], 'SelectDestination'); assert.deepEqual(Array.from(actions[0][1]), ['tv']);
     bindings.get('shortcut-mute-panic').handler(); assert.equal(actions[1][0], 'TogglePanic');
     bindings.get('shortcut-noop-7').handler(); assert.equal(actions[2][0], 'ToggleMicMonitoring');
     bindings.get('shortcut-select-mic').handler(); assert.equal(e._targetChannel, 'mic');

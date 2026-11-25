@@ -61,10 +61,10 @@ func (c Config) Validate() error {
 	if c.VirtualSink == c.VirtualSource || c.StabilizationMS < 1000 || c.StabilizationMS > 5000 {
 		return errors.New("invalid virtual nodes or stabilization window (1000..5000 ms)")
 	}
-	if len(c.Destinations) != 2 {
-		return errors.New("exactly AKG and SP166 destinations required")
+	if len(c.Destinations) < 2 || len(c.Destinations) > 3 {
+		return errors.New("2 or 3 destinations (akg, sp166, and optional tv) required")
 	}
-	var akg, sp *domain.Destination
+	var akg, sp, tv *domain.Destination
 	for _, item := range c.Destinations {
 		dest, err := domain.NewDestination(item)
 		if err != nil {
@@ -73,20 +73,29 @@ func (c Config) Validate() error {
 		if dest.PhysicalSinkName == "" || dest.CardName == "" || dest.RouteName == "" {
 			return errors.New("missing destination hardware identity")
 		}
-		if dest.ID == domain.DestAKG {
+		switch dest.ID {
+		case domain.DestAKG:
 			if akg != nil || item.PhysicalCeilingPct < 1 || item.PhysicalCeilingPct > 97 {
 				return errors.New("AKG ceiling must be 1..97")
 			}
 			akg = dest
-		} else {
+		case domain.DestSP166:
 			if sp != nil || item.PhysicalCeilingPct < 1 || item.PhysicalCeilingPct > 100 {
 				return errors.New("SP166 ceiling must be 1..100")
 			}
 			sp = dest
+		case domain.DestTV:
+			if tv != nil || item.PhysicalCeilingPct < 1 || item.PhysicalCeilingPct > 100 {
+				return errors.New("TV ceiling must be 1..100")
+			}
+			tv = dest
 		}
 	}
 	if akg == nil || sp == nil || akg.PhysicalSinkName != sp.PhysicalSinkName || akg.CardName != sp.CardName || akg.RouteName == sp.RouteName || akg.AlsaActiveControl != sp.AlsaInactiveControl || sp.AlsaActiveControl != akg.AlsaInactiveControl {
 		return errors.New("destinations must share sink/card and isolate opposite pins/routes")
+	}
+	if tv != nil && tv.PhysicalSinkName == akg.PhysicalSinkName {
+		return errors.New("TV destination must use its own physical sink")
 	}
 	for _, d := range []*domain.Destination{akg, sp} {
 		if (d.AlsaActiveControl != "Headphone" && d.AlsaActiveControl != "Front") || (d.AlsaInactiveControl != "Headphone" && d.AlsaInactiveControl != "Front") {
@@ -111,22 +120,18 @@ func (c Config) controller(store *domain.SessionStore, sessionID string) (*domai
 	if err := c.Validate(); err != nil {
 		return nil, err
 	}
-	var akg, sp *domain.Destination
+	dests := make([]*domain.Destination, 0, len(c.Destinations))
 	for _, item := range c.Destinations {
 		dest, err := domain.NewDestination(item)
 		if err != nil {
 			return nil, err
 		}
-		if dest.ID == domain.DestAKG {
-			akg = dest
-		} else {
-			sp = dest
-		}
+		dests = append(dests, dest)
 	}
 	if store != nil {
-		return domain.NewSessionController(store, sessionID, akg, sp)
+		return domain.NewSessionControllerWithList(store, sessionID, dests...)
 	}
-	return domain.NewAudioControllerWithDestinations(akg, sp), nil
+	return domain.NewAudioControllerWithList(dests...), nil
 }
 func (d *Daemon) Configure(cfg Config) error {
 	if err := cfg.Validate(); err != nil {

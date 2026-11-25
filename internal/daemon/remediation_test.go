@@ -372,3 +372,84 @@ func TestCorruptAudioSnapshotAndFailedPersistenceAreReported(t *testing.T) {
 		t.Fatal("observation erased unresolved persistence error")
 	}
 }
+
+func TestTransientUnreadableMuteRecoversWhenReconcileSucceeds(t *testing.T) {
+	d, pw, _, _ := setupTestDaemon(t)
+	fm := &failingMic{FakePipeWire: pw, readFails: true}
+	d.pw = fm
+	if err := d.Reconcile(); err == nil {
+		t.Fatal("expected reconcile error when mute read fails")
+	}
+	if !pw.NodeMutes[PhysicalSinkNode] {
+		t.Fatal("expected fail-safe mute on physical sink")
+	}
+	fm.readFails = false
+	if err := d.Reconcile(); err != nil {
+		t.Fatalf("healthy reconcile failed after transient mute error: %v", err)
+	}
+	if pw.NodeMutes[PhysicalSinkNode] {
+		t.Fatal("physical sink remained stuck muted after healthy reconcile")
+	}
+}
+
+func TestTVDestinationSwitchesCrossCardAndIsolatesAnalogPins(t *testing.T) {
+	d, pw, alsa, ee := setupTestDaemon(t)
+	cfg := DefaultConfig()
+	tvDest := domain.DefaultTVDestination()
+	cfg.Destinations = append(cfg.Destinations, domain.DestinationConfig{
+		ID:                 tvDest.ID,
+		Label:              tvDest.Label,
+		CardName:           tvDest.CardName,
+		PhysicalSinkName:   tvDest.PhysicalSinkName,
+		RouteName:          tvDest.RouteName,
+		PhysicalCeilingPct: tvDest.PhysicalCeiling.Percent(),
+		BasePreset:         tvDest.BasePreset,
+		PresetPrefixes:     tvDest.PresetPrefixes,
+	})
+	ctrl, err := cfg.Controller()
+	if err != nil {
+		t.Fatalf("config controller: %v", err)
+	}
+	d.ctrl = ctrl
+	d.Configure(cfg)
+	ee.AvailablePresets = append(ee.AvailablePresets, "TV - Padrão")
+	pw.SinkPorts[tvDest.PhysicalSinkName] = tvDest.RouteName
+
+	if err := d.SelectDestination("tv"); err != nil {
+		t.Fatalf("select tv: %v", err)
+	}
+	if !pw.NodeMutes[PhysicalSinkNode] {
+		t.Fatal("analog sink should be muted when TV is active")
+	}
+	if pw.NodeMutes[tvDest.PhysicalSinkName] {
+		t.Fatal("TV HDMI sink should be unmuted when TV is active")
+	}
+	if !alsa.ControlMutes[AlsaCard+":Headphone"] || !alsa.ControlMutes[AlsaCard+":Front"] {
+		t.Fatal("both analog ALSA pins must be muted when TV is active")
+	}
+	if ee.Devices.Output != tvDest.PhysicalSinkName {
+		t.Fatalf("expected EasyEffects output %q, got %q", tvDest.PhysicalSinkName, ee.Devices.Output)
+	}
+	if vol, err := d.SetVolumeForDestination("tv", 80); err != nil || vol != 80 {
+		t.Fatalf("SetVolumeForDestination(tv, 80) failed: vol=%d err=%v", vol, err)
+	}
+	if active, err := d.SetOutputBoost(true); err != nil || !active {
+		t.Fatalf("SetOutputBoost(true) on tv failed: active=%v err=%v", active, err)
+	}
+	if vol, err := d.SetVolumeForDestination("tv", 125); err != nil || vol != 125 {
+		t.Fatalf("SetVolumeForDestination(tv, 125) with Boost failed: vol=%d err=%v", vol, err)
+	}
+	if active, err := d.SetOutputBoost(false); err != nil || active {
+		t.Fatalf("SetOutputBoost(false) on tv failed: active=%v err=%v", active, err)
+	}
+
+	if err := d.SelectDestination("akg"); err != nil {
+		t.Fatalf("select akg: %v", err)
+	}
+	if !pw.NodeMutes[tvDest.PhysicalSinkName] {
+		t.Fatal("TV HDMI sink must be muted when switching back to AKG")
+	}
+	if pw.NodeMutes[PhysicalSinkNode] {
+		t.Fatal("analog sink should be unmuted when AKG is active")
+	}
+}

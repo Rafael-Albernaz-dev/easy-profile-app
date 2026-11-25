@@ -1,0 +1,3 @@
+# Ignore MU900 KA-1333 USB microphone HID/Consumer Control input events in libinput
+# so accidental physical button presses on the microphone body do not trigger desktop media/mute keys.
+ACTION=="add|change", SUBSYSTEM=="input", ATTRS{idVendor}=="0a67", ATTRS{idProduct}=="d117", ENV{LIBINPUT_IGNORE_DEVICE}="1"

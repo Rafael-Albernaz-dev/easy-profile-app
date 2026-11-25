@@ -20,8 +20,12 @@
       <default><![CDATA[['KP_2']]]></default>
       <summary>Selecionar Caixas SP166</summary>
     </key>
-    <key name="shortcut-select-mic" type="as">
+    <key name="shortcut-dest-tv" type="as">
       <default><![CDATA[['KP_3']]]></default>
+      <summary>Selecionar TV Panasonic (HDMI)</summary>
+    </key>
+    <key name="shortcut-select-mic" type="as">
+      <default><![CDATA[['KP_Multiply']]]></default>
       <summary>Selecionar Microfone para ajuste com +/-</summary>
     </key>
 
@@ -53,14 +57,10 @@
       <summary>Toggle Mute Total (Pânico)</summary>
     </key>
 
-    <!-- Daily reset on '*' and push-to-talk on '/' -->
+    <!-- Push-to-talk on '/' -->
     <key name="shortcut-push-to-talk" type="as">
       <default><![CDATA[['KP_Divide']]]></default>
       <summary>Segure 3s para push-to-talk; toque para sair</summary>
-    </key>
-    <key name="shortcut-reset-app" type="as">
-      <default><![CDATA[['KP_Multiply']]]></default>
-      <summary>Resetar Padrão Diário preservando mute do microfone</summary>
     </key>
 
     <!-- Key 7: Toggle Escuta do Microfone com Filtros -->

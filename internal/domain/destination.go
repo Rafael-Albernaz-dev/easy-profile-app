@@ -11,6 +11,7 @@ type DestinationID string
 const (
 	DestAKG     DestinationID = "akg"
 	DestSP166   DestinationID = "sp166"
+	DestTV      DestinationID = "tv"
 	DestUnknown DestinationID = "unknown"
 )
 
@@ -53,13 +54,17 @@ type DestinationConfig struct {
 
 // NewDestination constructs and validates an encapsulated Destination.
 func NewDestination(cfg DestinationConfig) (*Destination, error) {
-	if cfg.ID != DestAKG && cfg.ID != DestSP166 {
+	if cfg.ID != DestAKG && cfg.ID != DestSP166 && cfg.ID != DestTV {
 		return nil, fmt.Errorf("%w: %q", ErrUnknownDestination, cfg.ID)
 	}
 	if strings.TrimSpace(cfg.BasePreset) == "" {
 		return nil, ErrEmptyPresetName
 	}
-	if cfg.AlsaActiveControl == "" || cfg.AlsaInactiveControl == "" || cfg.AlsaActiveControl == cfg.AlsaInactiveControl {
+	if cfg.ID == DestTV {
+		if (cfg.AlsaActiveControl != "" || cfg.AlsaInactiveControl != "") && cfg.AlsaActiveControl == cfg.AlsaInactiveControl {
+			return nil, errors.New("ALSA active and inactive controls must be distinct when specified")
+		}
+	} else if cfg.AlsaActiveControl == "" || cfg.AlsaInactiveControl == "" || cfg.AlsaActiveControl == cfg.AlsaInactiveControl {
 		return nil, errors.New("ALSA active and inactive controls must be non-empty and distinct")
 	}
 
@@ -123,6 +128,21 @@ func DefaultSP166Destination() *Destination {
 		PhysicalCeilingPct:  100,
 		BasePreset:          "SP166 - Uso diario aprovado",
 		PresetPrefixes:      []string{"SP166", "Caixas", "[SP166]"},
+	})
+	return dest
+}
+
+// DefaultTVDestination returns the Panasonic HDMI TV destination configuration.
+func DefaultTVDestination() *Destination {
+	dest, _ := NewDestination(DestinationConfig{
+		ID:                 DestTV,
+		Label:              "TV Panasonic",
+		CardName:           "alsa_card.pci-0000_01_00.1",
+		PhysicalSinkName:   "alsa_output.pci-0000_01_00.1.hdmi-stereo-extra1",
+		RouteName:          "hdmi-output-1",
+		PhysicalCeilingPct: 100,
+		BasePreset:         "TV - Padrão",
+		PresetPrefixes:     []string{"TV", "Panasonic", "[TV]"},
 	})
 	return dest
 }

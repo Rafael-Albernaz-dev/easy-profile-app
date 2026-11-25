@@ -2,7 +2,7 @@
 
 Personal audio controller for Ubuntu 24.04 / GNOME Shell 46 Wayland, PipeWire 1.0.5, WirePlumber 0.4.17 and EasyEffects 7.1.6. One Go CLI/daemon and a native GJS extension communicate through Session D-Bus (`org.easyprofile.Daemon`).
 
-The calibrated setup uses AKG K52 front headphones, SP166 rear speakers and the KA-1333 USB microphone. Hardware identities, output routes and preset compatibility are configured in `configs/config.example.json`.
+The calibrated setup uses AKG K52 front headphones, SP166 rear speakers, Panasonic HDMI TV (`hdmi-output-1` on `HDA NVidia`) and the KA-1333 USB microphone. Hardware identities, output routes and preset compatibility are configured in `configs/config.example.json`.
 
 ## Current Status & Milestone Closure (v2 MVP)
 
@@ -54,7 +54,7 @@ See the [implementation, safety contract and human validation](docs/features/SYS
 | `-` | Focused output/mic volume −1%, clamped to 0% | Yes |
 | `1` | Select AKG K52; focus output | No |
 | `2` | Select SP166; focus output | No |
-| `3` | Toggle volume focus between output and microphone | No |
+| `3` | Select Panasonic HDMI TV (`tv`); focus output | No |
 | `4` | Select base preset (`BasePreset` / daily approved profile) for the active output | No |
 | `5` | Previous preset (circular cycle through all compatible presets) | No |
 | `6` | Next preset (circular cycle through all compatible presets) | No |
@@ -62,24 +62,24 @@ See the [implementation, safety contract and human validation](docs/features/SYS
 | `.` / `,` | Output mute (`KP_Decimal` / `KP_Separator`) | No |
 | `Enter` | Panic: output and microphone mute; toggle restores independent snapshot | No |
 | `/` | Hold 3s to enter push-to-talk; tap to exit | No |
-| `*` | Daily reset: base preset, output 95%, mic 100%; preserves both mic mutes | No |
+| `*` | Toggle volume focus between output and microphone (`+/-`) | No |
 | `7` | Toggle post-DSP microphone monitoring (sidetone); blue headset panel icon; auto-unmutes mic | No |
 | `8` | Toggle whole-output sharing into one active call capture | No |
 | `9` | Toggle output Boost: unlock 150% ceiling without raising the current level | No |
 
 NumLock is monitored natively; the other 16 bindings are registered only in audio mode. Only `+`/`-` allow autorepeat. Routine actions produce no OSD; real errors do. Volume labels update locally while confirmation is pending. Icons/mute claims use daemon state rather than assuming hardware success. Restart is available from the menu through systemd only; `*` does not restart the daemon.
 
-## Calibrated EasyEffects output presets (SP166 & AKG K52)
+## Calibrated EasyEffects output presets (SP166, AKG K52 & Panasonic TV)
 
-Ten listening-tested output presets for EasyEffects 7.1.6 are versioned in [`presets/output/`](presets/output/), covering five distinct acoustic modes for both Multi/Multilaser SP166 2.1 speakers and AKG K52 closed-back headphones:
+Fifteen listening-tested output presets for EasyEffects 7.1.6 are versioned in [`presets/output/`](presets/output/), covering five acoustic modes for Multi/Multilaser SP166 2.1 speakers, AKG K52 closed-back headphones, and Panasonic HDMI TV (`TV - Padrão` uses the Cinema dialogue-clarity chain):
 
-| Mode | SP166 Preset | AKG K52 Preset | Intended Use & Acoustic Target |
-|---|---|---|---|
-| **Padrão** | [`SP166 - Padrão.json`](presets/output/SP166%20-%20Padrão.json) | [`AKG K52 - Padrão.json`](presets/output/AKG%20K52%20-%20Padrão.json) | Daily reference; speech, meetings, classes, and general music |
-| **Bass** | [`SP166 - Bass.json`](presets/output/SP166%20-%20Bass.json) | [`AKG K52 - Bass.json`](presets/output/AKG%20K52%20-%20Bass.json) | Low-end impact and weight; electronic, trance, techno, hardstyle, hardtekk |
-| **Cinema** | [`SP166 - Cinema.json`](presets/output/SP166%20-%20Cinema.json) | [`AKG K52 - Cinema.json`](presets/output/AKG%20K52%20-%20Cinema.json) | Dialogue clarity and dynamic contrast between speech and action |
-| **Jazz** | [`SP166 - Jazz.json`](presets/output/SP166%20-%20Jazz.json) | [`AKG K52 - Jazz.json`](presets/output/AKG%20K52%20-%20Jazz.json) | Open acoustic soundstage, piano, brass, and cymbal air |
-| **Rock** | [`SP166 - Rock.json`](presets/output/SP166%20-%20Rock.json) | [`AKG K52 - Rock.json`](presets/output/AKG%20K52%20-%20Rock.json) | Body, guitar/vocal presence, and drum transient punch |
+| Mode | SP166 Preset | AKG K52 Preset | Panasonic TV Preset | Intended Use & Acoustic Target |
+|---|---|---|---|---|
+| **Padrão** | [`SP166 - Padrão.json`](presets/output/SP166%20-%20Padrão.json) | [`AKG K52 - Padrão.json`](presets/output/AKG%20K52%20-%20Padrão.json) | [`TV - Padrão.json`](presets/output/TV%20-%20Padrão.json) | Daily reference (`TV - Padrão` uses the Cinema dialogue-clarity chain) |
+| **Bass** | [`SP166 - Bass.json`](presets/output/SP166%20-%20Bass.json) | [`AKG K52 - Bass.json`](presets/output/AKG%20K52%20-%20Bass.json) | [`TV - Bass.json`](presets/output/TV%20-%20Bass.json) | Low-end impact and weight; electronic, trance, techno, hardstyle, hardtekk |
+| **Cinema** | [`SP166 - Cinema.json`](presets/output/SP166%20-%20Cinema.json) | [`AKG K52 - Cinema.json`](presets/output/AKG%20K52%20-%20Cinema.json) | [`TV - Cinema.json`](presets/output/TV%20-%20Cinema.json) | Dialogue clarity and dynamic contrast between speech and action |
+| **Jazz** | [`SP166 - Jazz.json`](presets/output/SP166%20-%20Jazz.json) | [`AKG K52 - Jazz.json`](presets/output/AKG%20K52%20-%20Jazz.json) | [`TV - Jazz.json`](presets/output/TV%20-%20Jazz.json) | Open acoustic soundstage, piano, brass, and cymbal air |
+| **Rock** | [`SP166 - Rock.json`](presets/output/SP166%20-%20Rock.json) | [`AKG K52 - Rock.json`](presets/output/AKG%20K52%20-%20Rock.json) | [`TV - Rock.json`](presets/output/TV%20-%20Rock.json) | Body, guitar/vocal presence, and drum transient punch |
 
 All presets and metadata are indexed in [`presets/manifest.json`](presets/manifest.json).
 
@@ -95,9 +95,9 @@ All presets and metadata are indexed in [`presets/manifest.json`](presets/manife
 ### EasyProfileApp integration
 
 In EasyProfileApp destinations (`config.json`), set `Padrão` as `base_preset` and list the remaining presets alphabetically (`Padrão → Bass → Cinema → Jazz → Rock`):
-- Keypad `4`: Instantly selects the base preset (`SP166 - Padrão` or `AKG K52 - Padrão`).
+- Keypad `4`: Instantly selects the base preset (`SP166 - Padrão`, `AKG K52 - Padrão`, or `TV - Padrão`).
 - Keypad `5` / `6`: Circularly cycles previous / next compatible presets.
-- Jazz and Rock are also directly selectable from the GNOME Shell tray menu or CLI.
+- Optional udev rule [`configs/99-ka1333-ignore-hid.rules`](configs/99-ka1333-ignore-hid.rules) blocks KA-1333 USB HID Consumer Control events in `libinput` so accidental button presses on the microphone body do not trigger desktop keys (the analog hardware echo wheel is internal to the microphone DSP).
 
 ### Preset checksums & installation
 
@@ -113,6 +113,11 @@ In EasyProfileApp destinations (`config.json`), set `Padrão` as `base_preset` a
 | `presets/output/AKG K52 - Cinema.json` | 13584 | `7f3b2d17c789101668655465691337d3236f1bce1ccbf88672f4bd8230bad858` |
 | `presets/output/AKG K52 - Jazz.json` | 14135 | `6dfe0e71b2c6aac38e17ecd3ae20d76eb7fef228063825c1303756a9ecaeb732` |
 | `presets/output/AKG K52 - Rock.json` | 5055 | `e4b0f067afa5957338fc7cd1d4a128c62291027577b64fdac043afa293d14b5c` |
+| `presets/output/TV - Padrão.json` | 13583 | `4e8a8591effe1728b986a636f30562be33fdf56d8d493f4cd2114ddb6cfc216c` |
+| `presets/output/TV - Bass.json` | 2919 | `65c54cf505aca620350df5a2fbbdcb6004451efc5455ab48a201fde4114deb6b` |
+| `presets/output/TV - Cinema.json` | 13583 | `4e8a8591effe1728b986a636f30562be33fdf56d8d493f4cd2114ddb6cfc216c` |
+| `presets/output/TV - Jazz.json` | 14134 | `56f5ff4f92000c56394927f9b9a88d395fce148ae34912e0344201cf7d1c5796` |
+| `presets/output/TV - Rock.json` | 5054 | `04a1b45f5878866e7bbaa59494483ef093d530e397251b88b39de9a5506b2767` |
 
 Presets can be copied to `~/.config/easyeffects/output/` (native package) or imported via the EasyEffects interface.
 

@@ -146,6 +146,41 @@
         "limiter#0"
       ],
       "owner_listening_status": "approved"
+    },
+    {
+      "name": "TV - Padrão",
+      "device": "TV Panasonic",
+      "file": "presets/output/TV - Padrão.json",
+      "bytes": 13583,
+      "sha256": "4e8a8591effe1728b986a636f30562be33fdf56d8d493f4cd2114ddb6cfc216c"
+    },
+    {
+      "name": "TV - Bass",
+      "device": "TV Panasonic",
+      "file": "presets/output/TV - Bass.json",
+      "bytes": 2919,
+      "sha256": "65c54cf505aca620350df5a2fbbdcb6004451efc5455ab48a201fde4114deb6b"
+    },
+    {
+      "name": "TV - Cinema",
+      "device": "TV Panasonic",
+      "file": "presets/output/TV - Cinema.json",
+      "bytes": 13583,
+      "sha256": "4e8a8591effe1728b986a636f30562be33fdf56d8d493f4cd2114ddb6cfc216c"
+    },
+    {
+      "name": "TV - Jazz",
+      "device": "TV Panasonic",
+      "file": "presets/output/TV - Jazz.json",
+      "bytes": 14134,
+      "sha256": "56f5ff4f92000c56394927f9b9a88d395fce148ae34912e0344201cf7d1c5796"
+    },
+    {
+      "name": "TV - Rock",
+      "device": "TV Panasonic",
+      "file": "presets/output/TV - Rock.json",
+      "bytes": 5054,
+      "sha256": "04a1b45f5878866e7bbaa59494483ef093d530e397251b88b39de9a5506b2767"
     }
   ],
   "new_preset_names": "device - one word",

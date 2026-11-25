@@ -11,6 +11,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/toru/easy-profile-app/internal/inspect"
 )
@@ -381,7 +382,11 @@ func (r *RealEasyEffects) SetOutputBoost(ctx context.Context, enabled bool, perc
 			return fmt.Errorf("boost installed schema validation failed: %w", err)
 		}
 	}
-	ctx, cancel := context.WithTimeout(ctx, r.timeout)
+	boostTimeout := r.timeout
+	if boostTimeout < 8*time.Second {
+		boostTimeout = 8 * time.Second
+	}
+	ctx, cancel := context.WithTimeout(ctx, boostTimeout)
 	defer cancel()
 	get := func(schema, key string) (string, error) {
 		out, err := exec.CommandContext(ctx, "gsettings", "get", schema, key).Output()

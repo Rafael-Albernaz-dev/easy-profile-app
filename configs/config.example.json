@@ -28,6 +28,18 @@
       "physical_ceiling_pct": 100,
       "base_preset": "SP166 - Uso diario aprovado",
       "preset_prefixes": ["SP166", "Caixas", "[SP166]"]
+    },
+    {
+      "id": "tv",
+      "label": "TV Panasonic",
+      "card_name": "alsa_card.pci-0000_01_00.1",
+      "physical_sink_name": "alsa_output.pci-0000_01_00.1.hdmi-stereo-extra1",
+      "route_name": "hdmi-output-1",
+      "alsa_active_control": "",
+      "alsa_inactive_control": "",
+      "physical_ceiling_pct": 100,
+      "base_preset": "TV - Padrão",
+      "preset_prefixes": ["TV", "Panasonic", "[TV]"]
     }
   ]
 }
