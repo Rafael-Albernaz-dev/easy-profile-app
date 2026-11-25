@@ -181,6 +181,14 @@
       "file": "presets/output/TV - Rock.json",
       "bytes": 5054,
       "sha256": "04a1b45f5878866e7bbaa59494483ef093d530e397251b88b39de9a5506b2767"
+    },
+    {
+      "name": "KA-1333 - Voz Limpa",
+      "device": "KA-1333",
+      "direction": "input",
+      "file": "presets/input/KA-1333 - Voz Limpa.json",
+      "bytes": 8280,
+      "sha256": "a0ec2ac05748dc438882db63ee02b0f8934c1ebbc5e44162d991f7e069367f85"
     }
   ],
   "new_preset_names": "device - one word",

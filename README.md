@@ -118,8 +118,13 @@ In EasyProfileApp destinations (`config.json`), set `Padrão` as `base_preset` a
 | `presets/output/TV - Cinema.json` | 13583 | `4e8a8591effe1728b986a636f30562be33fdf56d8d493f4cd2114ddb6cfc216c` |
 | `presets/output/TV - Jazz.json` | 14134 | `56f5ff4f92000c56394927f9b9a88d395fce148ae34912e0344201cf7d1c5796` |
 | `presets/output/TV - Rock.json` | 5054 | `04a1b45f5878866e7bbaa59494483ef093d530e397251b88b39de9a5506b2767` |
+| `presets/input/KA-1333 - Voz Limpa.json` | 8280 | `a0ec2ac05748dc438882db63ee02b0f8934c1ebbc5e44162d991f7e069367f85` |
 
-Presets can be copied to `~/.config/easyeffects/output/` (native package) or imported via the EasyEffects interface.
+### Calibrated EasyEffects input preset (KA-1333 USB microphone)
+
+[`presets/input/KA-1333 - Voz Limpa.json`](presets/input/KA-1333%20-%20Voz%20Limpa.json) is the calibrated daily input chain for the KA-1333 microphone (`rnnoise#0` neural noise reduction + VAD 55% / 180 ms release → `gate#0` -34 dB / -48 dB with 5 ms lookahead and 120 Hz–7 kHz sidechain filter → 6-band vocal `equalizer#0` → `compressor#0` 3:1 / -22 dB / +5 dB makeup → `deesser#0` → `limiter#0` -1.5 dB ALR). Copy to `~/.config/easyeffects/input/` and configure it as the EasyEffects input autoload preset for `alsa_input.usb-MU900_KA-1333*`.
+
+Output presets can be copied to `~/.config/easyeffects/output/` (native package) or imported via the EasyEffects interface.
 
 ### Sources & Attributions
 
