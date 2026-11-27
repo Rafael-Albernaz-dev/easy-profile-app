@@ -71,17 +71,25 @@ type RouteInfo struct {
 	Name      string     `json:"name"`
 	Direction string     `json:"direction"`
 	Available string     `json:"available,omitempty"`
+	Profiles  []int      `json:"-"`
 	Volume    VolumeInfo `json:"volume"`
 }
 
+type ProfileInfo struct {
+	Index     int    `json:"index"`
+	Name      string `json:"name"`
+	Available string `json:"available,omitempty"`
+}
+
 type DeviceInfo struct {
-	ID           int         `json:"id"`
-	Name         string      `json:"name"`
-	Serial       string      `json:"serial,omitempty"`
-	VendorID     string      `json:"vendor_id,omitempty"`
-	ProductID    string      `json:"product_id,omitempty"`
-	ActiveRoutes []RouteInfo `json:"active_routes"`
-	EnumRoutes   []RouteInfo `json:"enum_routes"`
+	ID           int           `json:"id"`
+	Name         string        `json:"name"`
+	Serial       string        `json:"serial,omitempty"`
+	VendorID     string        `json:"vendor_id,omitempty"`
+	ProductID    string        `json:"product_id,omitempty"`
+	EnumProfiles []ProfileInfo `json:"enum_profiles,omitempty"`
+	ActiveRoutes []RouteInfo   `json:"active_routes"`
+	EnumRoutes   []RouteInfo   `json:"enum_routes"`
 }
 
 type LinkInfo struct {
@@ -129,9 +137,10 @@ type rawInfo struct {
 }
 
 type rawParams struct {
-	Props     []rawVolumeParam `json:"Props"`
-	Route     []rawRoute       `json:"Route"`
-	EnumRoute []rawRoute       `json:"EnumRoute"`
+	Props       []rawVolumeParam `json:"Props"`
+	Route       []rawRoute       `json:"Route"`
+	EnumRoute   []rawRoute       `json:"EnumRoute"`
+	EnumProfile []ProfileInfo    `json:"EnumProfile"`
 }
 
 type rawVolumeParam struct {
@@ -147,6 +156,7 @@ type rawRoute struct {
 	Index     int             `json:"index"`
 	Device    int             `json:"device"`
 	Devices   []int           `json:"devices"`
+	Profiles  []int           `json:"profiles"`
 	Name      string          `json:"name"`
 	Direction string          `json:"direction"`
 	Available string          `json:"available"`
@@ -255,18 +265,19 @@ func mergeVolumeParams(params []rawVolumeParam) VolumeInfo {
 func parseDevice(id int, info *rawInfo) *DeviceInfo {
 	p := info.Props
 	d := &DeviceInfo{
-		ID:        id,
-		Name:      propString(p, "device.name"),
-		Serial:    propString(p, "device.serial"),
-		VendorID:  propString(p, "device.vendor.id"),
-		ProductID: propString(p, "device.product.id"),
+		ID:           id,
+		Name:         propString(p, "device.name"),
+		Serial:       propString(p, "device.serial"),
+		VendorID:     propString(p, "device.vendor.id"),
+		ProductID:    propString(p, "device.product.id"),
+		EnumProfiles: info.Params.EnumProfile,
 	}
 	convert := func(r rawRoute) RouteInfo {
 		dev := r.Device
 		if dev == 0 && len(r.Devices) > 0 {
 			dev = r.Devices[0]
 		}
-		ri := RouteInfo{Index: r.Index, Device: dev, Name: r.Name, Direction: r.Direction, Available: r.Available}
+		ri := RouteInfo{Index: r.Index, Device: dev, Name: r.Name, Direction: r.Direction, Available: r.Available, Profiles: r.Profiles}
 		if r.Props != nil {
 			ri.Volume = mergeVolumeParams([]rawVolumeParam{*r.Props})
 		}

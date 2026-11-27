@@ -129,10 +129,18 @@ function extension() {
     bindings.get('shortcut-preset-3').handler();
     assert.equal(actions[7][0], 'SelectPreset'); assert.deepEqual(Array.from(actions[7][1]), ['Preset 3']);
     assert.equal(actions.length, 8);
+    e._status.active_destination = {id: 'tv', port_name: 'hdmi-output-1'};
+    e._status.observed_destination = 'hdmi-output-1';
+    bindings.get('shortcut-dest-tv').handler();
+    assert.equal(actions.length, 8);
+    e._status.observed_destination = '';
+    bindings.get('shortcut-dest-tv').handler();
+    assert.equal(actions[8][0], 'SelectDestination');
+    assert.deepEqual(Array.from(actions[8][1]), ['tv']);
     e._keymap.get_num_lock_state = () => false;
     bindings.get('shortcut-mute-panic').handler();
     bindings.get('shortcut-noop-8').handler(); bindings.get('shortcut-noop-9').handler();
-    assert.equal(actions.length, 8);
+    assert.equal(actions.length, 9);
     e._unregisterKeybindings(); assert.equal(bindings.size, 0);
 }
 {

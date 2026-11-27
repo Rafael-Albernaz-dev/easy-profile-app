@@ -278,7 +278,7 @@ func (r *RealPipeWire) SetNodeMute(ctx context.Context, nodeName string, muted b
 	return nil
 }
 
-// SetSinkPort sets the active analog port on the physical sink using pactl.
+// SetSinkPort sets the active port on the physical sink using the PipeWire Route param.
 func (r *RealPipeWire) SetSinkPort(ctx context.Context, sinkName string, portName string) error {
 	if err := r.checkTestMode(); err != nil {
 		return err
@@ -299,7 +299,7 @@ func (r *RealPipeWire) SetSinkPort(ctx context.Context, sinkName string, portNam
 		return fmt.Errorf("device not found for sink %q", sinkName)
 	}
 	for _, route := range device.EnumRoutes {
-		if route.Name == portName && route.Direction == "Output" {
+		if route.Name == portName && route.Direction == "Output" && route.Available != "no" {
 			props := fmt.Sprintf(`{"index": %d, "device": %d, "save": false}`, route.Index, route.Device)
 			ctx, cancel := context.WithTimeout(ctx, r.timeout)
 			defer cancel()
@@ -413,7 +413,7 @@ func sinkPort(g *inspect.Graph, name string) (string, error) {
 		if n.Name == name {
 			if d := g.Devices[n.DeviceID]; d != nil {
 				for _, route := range d.ActiveRoutes {
-					if route.Direction == "Output" {
+					if route.Direction == "Output" && route.Available != "no" {
 						return route.Name, nil
 					}
 				}

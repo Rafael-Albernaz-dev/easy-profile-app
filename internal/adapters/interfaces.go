@@ -58,6 +58,7 @@ type PipeWirePort interface {
 	SetNodeMute(ctx context.Context, nodeName string, muted bool) error
 	GetNodeMute(ctx context.Context, nodeName string) (bool, error)
 	GetSinkPort(ctx context.Context, sinkName string) (string, error)
+	PrepareHDMIOutput(ctx context.Context, cardName, sinkName, routeName string) error
 	MigrateRawMicStream(ctx context.Context, micPrefix, virtualName, application string) error
 
 	// SetSinkPort switches the active analog port on the physical sink (e.g. analog-output-headphones vs analog-output-lineout).

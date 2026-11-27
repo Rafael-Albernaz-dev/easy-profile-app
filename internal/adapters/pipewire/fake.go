@@ -178,6 +178,15 @@ func (f *FakePipeWire) GetNodeMute(ctx context.Context, name string) (bool, erro
 	defer f.mu.RUnlock()
 	return f.NodeMutes[name], nil
 }
+func (f *FakePipeWire) PrepareHDMIOutput(ctx context.Context, cardName, sinkName, routeName string) error {
+	f.mu.RLock()
+	defer f.mu.RUnlock()
+	if f.SinkPorts[sinkName] != routeName {
+		return fmt.Errorf("HDMI route %q unavailable", routeName)
+	}
+	return nil
+}
+
 func (f *FakePipeWire) GetSinkPort(ctx context.Context, name string) (string, error) {
 	f.mu.RLock()
 	defer f.mu.RUnlock()

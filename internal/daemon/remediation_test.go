@@ -8,6 +8,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/toru/easy-profile-app/internal/adapters"
+	"github.com/toru/easy-profile-app/internal/adapters/pipewire"
 	"github.com/toru/easy-profile-app/internal/domain"
 )
 
@@ -392,6 +394,40 @@ func TestTransientUnreadableMuteRecoversWhenReconcileSucceeds(t *testing.T) {
 	}
 }
 
+type disconnectedHDMIDuringSwitch struct {
+	*pipewire.FakePipeWire
+	tvSink string
+}
+
+func (p *disconnectedHDMIDuringSwitch) ReadObservation(ctx context.Context, sink, source, physicalSink, micPrefix string) (adapters.PipeWireObservation, error) {
+	observed, err := p.FakePipeWire.ReadObservation(ctx, sink, source, physicalSink, micPrefix)
+	if physicalSink == p.tvSink {
+		observed.SinkPort = ""
+	}
+	return observed, err
+}
+
+func TestStartupWithUnavailableTVBindsOnlyConfirmedMutedAnalogRoute(t *testing.T) {
+	d, pw, _, ee := setupTestDaemon(t)
+	cfg := DefaultConfig()
+	tv := domain.DefaultTVDestination()
+	d.ctrl = domain.NewAudioControllerWithList(domain.DefaultAKGDestination(), domain.DefaultSP166Destination(), tv)
+	if _, _, err := d.ctrl.SwitchDestination(domain.DestTV); err != nil {
+		t.Fatal(err)
+	}
+	d.Configure(cfg)
+	ee.Devices.Output = tv.PhysicalSinkName
+	if err := d.InitHardware(context.Background()); err != nil {
+		t.Fatalf("daemon startup with missing TV: %v", err)
+	}
+	if d.ctrl.ActiveDestination().ID != domain.DestAKG || ee.Devices.Output != PhysicalSinkNode {
+		t.Fatal("expected startup on the confirmed AKG route")
+	}
+	if !d.ctrl.OutputMuted() || !pw.NodeMutes[PhysicalSinkNode] {
+		t.Fatal("startup must not play TV audio through the fallback output")
+	}
+}
+
 func TestTVDestinationSwitchesCrossCardAndIsolatesAnalogPins(t *testing.T) {
 	d, pw, alsa, ee := setupTestDaemon(t)
 	cfg := DefaultConfig()
@@ -413,8 +449,29 @@ func TestTVDestinationSwitchesCrossCardAndIsolatesAnalogPins(t *testing.T) {
 	d.ctrl = ctrl
 	d.Configure(cfg)
 	ee.AvailablePresets = append(ee.AvailablePresets, "TV - Padrão")
-	pw.SinkPorts[tvDest.PhysicalSinkName] = tvDest.RouteName
+	// The hotkey/menu must leave the current route, DSP and mixer alone
+	// when the TV is disconnected, even if the NVIDIA card exists.
+	before := len(pw.Calls)
+	if err := d.SelectDestination("tv"); err == nil {
+		t.Fatal("selecting an unavailable TV must fail")
+	}
+	if d.ctrl.ActiveDestination().ID != domain.DestAKG || len(pw.Calls) != before {
+		t.Fatal("unavailable TV must not switch the destination or mutate PipeWire")
+	}
 
+	// Simulate unplug after preflight and initial route validation.
+	pw.SinkPorts[tvDest.PhysicalSinkName] = tvDest.RouteName
+	d.pw = &disconnectedHDMIDuringSwitch{FakePipeWire: pw, tvSink: tvDest.PhysicalSinkName}
+	if err := d.SelectDestination("tv"); err == nil {
+		t.Fatal("losing HDMI mid-switch must fail")
+	}
+	if d.ctrl.ActiveDestination().ID != domain.DestAKG || pw.NodeMutes[PhysicalSinkNode] ||
+		!pw.NodeMutes[tvDest.PhysicalSinkName] || ee.Devices.Output != PhysicalSinkNode {
+		t.Fatal("losing HDMI mid-switch must restore the previous audio output")
+	}
+
+	// A subsequent selection after hotplug must work with the same config.
+	d.pw = pw
 	if err := d.SelectDestination("tv"); err != nil {
 		t.Fatalf("select tv: %v", err)
 	}

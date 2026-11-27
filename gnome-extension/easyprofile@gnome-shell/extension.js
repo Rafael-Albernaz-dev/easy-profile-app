@@ -169,7 +169,8 @@ export default class EasyProfileExtension extends Extension {
         });
         this._btnTV.connect('clicked', () => {
             this._targetChannel = 'out';
-            if (this._status?.active_destination?.id !== 'tv') {
+            if (this._status?.active_destination?.id !== 'tv' ||
+                this._status?.observed_destination !== this._status?.active_destination?.port_name) {
                 this._callDBus('SelectDestination', ['tv']);
             }
             this._updateLabel();
@@ -774,7 +775,8 @@ export default class EasyProfileExtension extends Extension {
             // 5) TECLA "3": seleciona a TV Panasonic (HDMI) e restaura foco para saída
             {name: 'shortcut-dest-tv', flags: noRepeat, handler: () => {
                 this._targetChannel = 'out';
-                if (this._status?.active_destination?.id !== 'tv') {
+                if (this._status?.active_destination?.id !== 'tv' ||
+                    this._status?.observed_destination !== this._status?.active_destination?.port_name) {
                     this._callDBus('SelectDestination', ['tv']);
                 } else {
                     const preset = this._status?.active_preset ? `\nPreset: ${this._status.active_preset}` : '';

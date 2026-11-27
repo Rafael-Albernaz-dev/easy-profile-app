@@ -453,6 +453,8 @@ func (d *Daemon) InitHardware(ctx context.Context) error {
 		}
 
 		target := domain.DestUnknown
+		analogFallback := domain.DestUnknown
+		tvUnavailable := false
 		devices, _ := d.ee.ReadDevices(c)
 		routeBySink := map[string]string{}
 		for _, id := range d.ctrl.DestinationIDs() {
@@ -463,13 +465,19 @@ func (d *Daemon) InitHardware(ctx context.Context) error {
 			sinkRoute, ok := routeBySink[dest.PhysicalSinkName]
 			if !ok {
 				sinkRoute, err = d.pw.GetSinkPort(c, dest.PhysicalSinkName)
-				if err != nil {
+				if err != nil && dest.ID != domain.DestTV {
 					if dest.ID == d.ctrl.ActiveDestination().ID {
 						return err
 					}
 					continue
 				}
 				routeBySink[dest.PhysicalSinkName] = sinkRoute
+			}
+			if dest.ID == domain.DestTV && sinkRoute != dest.RouteName {
+				tvUnavailable = dest.ID == d.ctrl.ActiveDestination().ID || devices.Output == dest.PhysicalSinkName
+			}
+			if dest.ID != domain.DestTV && sinkRoute == dest.RouteName {
+				analogFallback = dest.ID
 			}
 			if sinkRoute == dest.RouteName && (devices.Output == "" || devices.Output == dest.PhysicalSinkName || dest.ID == d.ctrl.ActiveDestination().ID) {
 				target = id
@@ -478,6 +486,9 @@ func (d *Daemon) InitHardware(ctx context.Context) error {
 					break
 				}
 			}
+		}
+		if tvUnavailable && analogFallback != domain.DestUnknown {
+			target = analogFallback
 		}
 		if target == domain.DestUnknown {
 			return fmt.Errorf("unsupported active route %q", d.status.ObservedDestination)
@@ -544,6 +555,11 @@ func (d *Daemon) InitHardware(ctx context.Context) error {
 			}
 		}
 
+		// An unavailable TV at startup must not silently move its audio
+		// to speakers or headphones. Bind the confirmed analog route muted.
+		if tvUnavailable && !d.ctrl.OutputMuted() {
+			d.ctrl.ToggleOutputMute()
+		}
 		if err := d.ctrl.PersistenceError(); err != nil {
 			return err
 		}
@@ -741,6 +757,9 @@ func (d *Daemon) applyDestination(ctx context.Context, dest *domain.Destination)
 	if !d.status.DSPBound || !d.status.MonitorVolumesConfirmed {
 		return errors.New("DSP chain not confirmed; hardware remains muted")
 	}
+	if dest.ID == domain.DestTV && d.status.ObservedDestination != dest.RouteName {
+		return errors.New("TV Panasonic: rota HDMI deixou de responder durante a troca")
+	}
 	d.failSafeOutputMuted = false
 	return d.mute(ctx, dest.PhysicalSinkName, d.ctrl.OutputMuted(), nil)
 }
@@ -930,6 +949,17 @@ func (d *Daemon) selectDestination(ctx context.Context, name string) error {
 	if err := d.control(); err != nil {
 		return err
 	}
+	target := domain.DestinationID(strings.ToLower(name))
+	dest, err := d.ctrl.Destination(target)
+	if err != nil {
+		return err
+	}
+	previous := d.ctrl.ActiveDestination()
+	if target == domain.DestTV {
+		if err := d.pw.PrepareHDMIOutput(ctx, dest.CardName, dest.PhysicalSinkName, dest.RouteName); err != nil {
+			return fmt.Errorf("TV Panasonic: %w", err)
+		}
+	}
 	if d.ctrl.PushToTalk() {
 		if err := d.setPushToTalk(ctx, false); err != nil {
 			return err
@@ -938,11 +968,18 @@ func (d *Daemon) selectDestination(ctx context.Context, name string) error {
 	if err := d.stopSharing(ctx); err != nil {
 		return err
 	}
-	dest, _, err := d.ctrl.SwitchDestination(domain.DestinationID(strings.ToLower(name)))
-	if err != nil {
+	if _, _, err := d.ctrl.SwitchDestination(target); err != nil {
 		return err
 	}
-	return d.applyDestination(ctx, dest)
+	err = d.applyDestination(ctx, dest)
+	if err == nil || target != domain.DestTV || previous.ID == target {
+		return err
+	}
+	_, _, restoreErr := d.ctrl.SwitchDestination(previous.ID)
+	if restoreErr == nil && ctx.Err() == nil {
+		restoreErr = d.applyDestination(ctx, previous)
+	}
+	return errors.Join(err, restoreErr)
 }
 func (d *Daemon) SelectDestination(name string) *dbus.Error {
 	return d.execute(false, func(ctx context.Context) error { return d.selectDestination(ctx, name) })
